@@ -79,3 +79,50 @@
 .text_danger {
     color: var(--SmartThemeQuoteColor);
 }
+
+/* Priority order drag-and-drop list */
+.stgl-priority-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    background: var(--black30a);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+}
+
+.stgl-priority-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    background: var(--SmartThemeBlurTintColor);
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    cursor: move;
+    transition: background 0.2s ease;
+}
+
+.stgl-priority-item:last-child {
+    border-bottom: none;
+}
+
+.stgl-priority-item:hover {
+    background: var(--black50a);
+}
+
+.stgl-priority-item.dragging {
+    opacity: 0.5;
+}
+
+.stgl-drag-handle {
+    color: var(--grey70);
+    cursor: grab;
+}
+
+.stgl-drag-handle:active {
+    cursor: grabbing;
+}
+
+.stgl-priority-label {
+    flex: 1;
+    font-weight: 500;
+}

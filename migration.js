@@ -3,7 +3,8 @@
  * Migrate data from STCL (CharacterLocks) and CCPM (CCPromptManager)
  */
 
-import { extension_settings, chat_metadata } from '../../../extensions.js';
+import { extension_settings } from '../../../extensions.js';
+import { chat_metadata } from '../../../../script.js';
 import { groups } from '../../../group-chats.js';
 
 const DEBUG_MODE = false;

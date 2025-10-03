@@ -5,7 +5,8 @@
  */
 
 import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popup.js';
-import { extension_settings, saveSettingsDebounced } from '../../../extensions.js';
+import { extension_settings } from '../../../extensions.js';
+import { saveSettingsDebounced } from '../../../../script.js';
 
 let mainPopup = null;
 
@@ -123,6 +124,9 @@ async function renderTemplateList() {
                         </div>
                         <div class="menu_button menu_button_icon interactable" onclick="window.stglViewPrompts('${t.id}')" title="View/Edit Prompts" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-pencil"></i>
+                        </div>
+                        <div class="menu_button menu_button_icon interactable" onclick="window.stglLockTemplate('${t.id}')" title="Lock Template to Context" style="width: 32px; height: 32px; padding: 0;">
+                            <i class="fa-solid fa-lock"></i>
                         </div>
                         <div class="menu_button menu_button_icon interactable" onclick="window.stglEditTemplate('${t.id}')" title="Edit Template Name/Description" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-edit"></i>
@@ -329,6 +333,133 @@ window.stglViewPrompts = async function(templateId) {
 
     await callGenericPopup(content, POPUP_TYPE.TEXT, '', { okButton: 'Close' });
 };
+
+/**
+ * Lock template to character/model/chat
+ */
+window.stglLockTemplate = async function(templateId) {
+    const template = window.promptTemplateManager.getTemplate(templateId);
+    if (!template) {
+        toastr.error('Template not found');
+        return;
+    }
+
+    // We need to call the main STGL lock popup with this template pre-selected
+    // But since we're in a separate module, we'll create a simplified lock UI
+    const content = document.createElement('div');
+    content.innerHTML = `
+        <h3>Lock Template: ${escapeHtml(template.name)}</h3>
+        <p class="text_muted marginBot10">Save this template as a lock for the current context.</p>
+
+        <div class="flex-container flexFlowColumn flexGap10">
+            <button id="stgl-lock-to-character" class="menu_button menu_button_icon">
+                <i class="fa-solid fa-user"></i>
+                <span>Lock to Current Character/Group</span>
+            </button>
+            <button id="stgl-lock-to-chat" class="menu_button menu_button_icon">
+                <i class="fa-solid fa-comments"></i>
+                <span>Lock to Current Chat</span>
+            </button>
+            <button id="stgl-lock-to-model" class="menu_button menu_button_icon">
+                <i class="fa-solid fa-microchip"></i>
+                <span>Lock to Current Model</span>
+            </button>
+        </div>
+
+        <p class="text_muted marginTop10">
+            <i class="fa-solid fa-info-circle"></i>
+            This will save only the template lock. Use the main Generation Locks menu to lock profile/preset as well.
+        </p>
+    `;
+
+    const popup = new Popup(content, POPUP_TYPE.TEXT, '', {
+        okButton: false,
+        cancelButton: 'Cancel'
+    });
+
+    // Add click handlers
+    content.querySelector('#stgl-lock-to-character').addEventListener('click', async () => {
+        if (await lockTemplateToContext(templateId, 'character')) {
+            await popup.completeAffirmative();
+        }
+    });
+    content.querySelector('#stgl-lock-to-chat').addEventListener('click', async () => {
+        if (await lockTemplateToContext(templateId, 'chat')) {
+            await popup.completeAffirmative();
+        }
+    });
+    content.querySelector('#stgl-lock-to-model').addEventListener('click', async () => {
+        if (await lockTemplateToContext(templateId, 'model')) {
+            await popup.completeAffirmative();
+        }
+    });
+
+    await popup.show();
+};
+
+/**
+ * Lock template to a specific context dimension
+ */
+async function lockTemplateToContext(templateId, dimension) {
+    // Access STGL's storage and context via window API
+    if (!window.stglSettingsManager) {
+        toastr.error('STGL not initialized');
+        return false;
+    }
+
+    try {
+        const context = window.stglSettingsManager.chatContext.getCurrent();
+        const storage = window.stglSettingsManager.storage;
+
+        // Get existing lock or create new one with only template
+        let existingLock = null;
+        let key = null;
+
+        if (dimension === 'character') {
+            if (context.isGroupChat) {
+                key = context.groupId;
+                existingLock = storage.getGroupLock(key);
+            } else {
+                key = context.characterName;
+                existingLock = storage.getCharacterLock(key);
+            }
+        } else if (dimension === 'chat') {
+            existingLock = storage.getChatLock();
+        } else if (dimension === 'model') {
+            key = context.modelName;
+            existingLock = storage.getModelLock(key);
+        }
+
+        // Merge template into existing lock or create new
+        const newLock = existingLock
+            ? { ...existingLock, template: templateId }
+            : { profile: null, preset: null, template: templateId };
+
+        // Save the lock
+        if (dimension === 'character') {
+            if (context.isGroupChat) {
+                await storage.setGroupLock(key, newLock);
+                toastr.success('Template locked to group');
+            } else {
+                storage.setCharacterLock(key, newLock);
+                toastr.success('Template locked to character');
+            }
+        } else if (dimension === 'chat') {
+            storage.setChatLock(newLock);
+            toastr.success('Template locked to chat');
+        } else if (dimension === 'model') {
+            storage.setModelLock(key, newLock);
+            toastr.success('Template locked to model');
+        }
+
+        await renderTemplateList();
+        return true;
+    } catch (error) {
+        console.error('STGL: Failed to lock template:', error);
+        toastr.error('Failed to lock template');
+        return false;
+    }
+}
 
 /**
  * Import template from JSON

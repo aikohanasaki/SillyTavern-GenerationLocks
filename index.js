@@ -57,12 +57,13 @@ const DEFAULT_SETTINGS = {
         enableCharacterMemory: true,
         enableChatMemory: true,
         enableGroupMemory: true,
-        preferChatOverCharacterOrGroup: true,
-        preferChatOverModel: true,
         preferIndividualCharacterInGroup: false,
         showNotifications: true,
         autoApplyOnContextChange: AUTO_APPLY_MODES.ASK,
-        lockingMode: LOCKING_MODES.CHARACTER
+        lockingMode: LOCKING_MODES.CHARACTER,
+        // Priority order: first in array wins (highest priority)
+        // Default: CHAT > CHARACTER/GROUP > MODEL
+        priorityOrder: [SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL]
     },
     characterLocks: {},  // { [chId]: { profile, preset, template } }
     modelLocks: {},      // { [model]: { preset, template } } - NO profile field
@@ -226,7 +227,70 @@ class StorageAdapter {
         if (!extension_settings[this.EXTENSION_KEY]) {
             extension_settings[this.EXTENSION_KEY] = lodash.cloneDeep(DEFAULT_SETTINGS);
         }
-        return extension_settings[this.EXTENSION_KEY];
+
+        const settings = extension_settings[this.EXTENSION_KEY];
+
+        // Migration: Convert old checkbox preferences to priorityOrder array
+        if (!settings.moduleSettings.priorityOrder && (
+            settings.moduleSettings.preferChatOverCharacterOrGroup !== undefined ||
+            settings.moduleSettings.preferChatOverModel !== undefined
+        )) {
+            const {
+                lockingMode,
+                preferChatOverCharacterOrGroup,
+                preferChatOverModel
+            } = settings.moduleSettings;
+
+            // Determine primary source based on locking mode
+            const primary = lockingMode === LOCKING_MODES.CHARACTER
+                ? SETTING_SOURCES.CHARACTER
+                : SETTING_SOURCES.MODEL;
+
+            const loser = primary === SETTING_SOURCES.CHARACTER
+                ? SETTING_SOURCES.MODEL
+                : SETTING_SOURCES.CHARACTER;
+
+            // Build priority order based on old preferences
+            const priorityOrder = [];
+
+            if (primary === SETTING_SOURCES.CHARACTER) {
+                // Character mode
+                if (preferChatOverCharacterOrGroup && preferChatOverModel) {
+                    priorityOrder.push(SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL);
+                } else if (!preferChatOverCharacterOrGroup && preferChatOverModel) {
+                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL);
+                } else if (preferChatOverCharacterOrGroup && !preferChatOverModel) {
+                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER);
+                } else {
+                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT);
+                }
+            } else {
+                // Model mode
+                if (preferChatOverModel && preferChatOverCharacterOrGroup) {
+                    priorityOrder.push(SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL, SETTING_SOURCES.CHARACTER);
+                } else if (!preferChatOverModel && preferChatOverCharacterOrGroup) {
+                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER);
+                } else if (preferChatOverModel && !preferChatOverCharacterOrGroup) {
+                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL);
+                } else {
+                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT);
+                }
+            }
+
+            settings.moduleSettings.priorityOrder = priorityOrder;
+
+            // Clean up old preferences
+            delete settings.moduleSettings.preferChatOverCharacterOrGroup;
+            delete settings.moduleSettings.preferChatOverModel;
+
+            this.saveExtensionSettings();
+
+            if (DEBUG_MODE) {
+                console.log('STGL: Migrated old checkbox preferences to priorityOrder:', priorityOrder);
+            }
+        }
+
+        return settings;
     }
 
     saveExtensionSettings() {
@@ -526,88 +590,36 @@ class PriorityResolver {
 
     /**
      * Build priority cascade array based on context and preferences
+     * Uses priorityOrder array from preferences - first in array wins (highest priority)
      * @private
      */
     _buildCascade(context, preferences) {
         const {
             lockingMode,
-            preferChatOverCharacterOrGroup,
-            preferChatOverModel,
-            preferIndividualCharacterInGroup
+            preferIndividualCharacterInGroup,
+            priorityOrder
         } = preferences;
 
         const { isGroupChat } = context;
 
-        // Determine primary and loser
-        const primary = isGroupChat && lockingMode === LOCKING_MODES.CHARACTER
-            ? SETTING_SOURCES.GROUP
-            : lockingMode;
-
-        const loser = (primary === SETTING_SOURCES.CHARACTER || primary === SETTING_SOURCES.GROUP)
-            ? SETTING_SOURCES.MODEL
-            : isGroupChat ? SETTING_SOURCES.GROUP : SETTING_SOURCES.CHARACTER;
-
-        // Build cascade array based on both preference toggles
+        // Start with user's priority order
         const cascade = [];
 
-        // Helper to inject individual before group if needed
-        const injectIndividualBeforeGroup = (target) => {
-            if (isGroupChat && target === SETTING_SOURCES.GROUP && preferIndividualCharacterInGroup) {
-                cascade.push(SETTING_SOURCES.INDIVIDUAL);
-            }
-            cascade.push(target);
-        };
+        for (const source of priorityOrder) {
+            // Map CHARACTER to GROUP in group chats when in character mode
+            if (source === SETTING_SOURCES.CHARACTER) {
+                const effectiveSource = isGroupChat && lockingMode === LOCKING_MODES.CHARACTER
+                    ? SETTING_SOURCES.GROUP
+                    : SETTING_SOURCES.CHARACTER;
 
-        // Determine 3-way ordering based on BOTH preference toggles
-        if (primary === SETTING_SOURCES.CHARACTER || primary === SETTING_SOURCES.GROUP) {
-            // Primary is character/group, loser is model
-            // Use preferChatOverCharacterOrGroup and preferChatOverModel
+                // Inject INDIVIDUAL before GROUP if preference enabled
+                if (effectiveSource === SETTING_SOURCES.GROUP && preferIndividualCharacterInGroup) {
+                    cascade.push(SETTING_SOURCES.INDIVIDUAL);
+                }
 
-            if (preferChatOverCharacterOrGroup && preferChatOverModel) {
-                // Chat beats both: Chat → Character/Group → Model
-                cascade.push(SETTING_SOURCES.CHAT);
-                injectIndividualBeforeGroup(primary);
-                cascade.push(loser);
-            } else if (!preferChatOverCharacterOrGroup && preferChatOverModel) {
-                // Character/Group beats chat, chat beats model: Character/Group → Chat → Model
-                injectIndividualBeforeGroup(primary);
-                cascade.push(SETTING_SOURCES.CHAT);
-                cascade.push(loser);
-            } else if (preferChatOverCharacterOrGroup && !preferChatOverModel) {
-                // Model beats chat, chat beats character/group: Model → Chat → Character/Group
-                cascade.push(loser);
-                cascade.push(SETTING_SOURCES.CHAT);
-                injectIndividualBeforeGroup(primary);
+                cascade.push(effectiveSource);
             } else {
-                // Both beat chat: Character/Group → Model → Chat
-                injectIndividualBeforeGroup(primary);
-                cascade.push(loser);
-                cascade.push(SETTING_SOURCES.CHAT);
-            }
-        } else {
-            // Primary is model, loser is character/group
-            // Use preferChatOverModel and preferChatOverCharacterOrGroup
-
-            if (preferChatOverModel && preferChatOverCharacterOrGroup) {
-                // Chat beats both: Chat → Model → Character/Group
-                cascade.push(SETTING_SOURCES.CHAT);
-                cascade.push(primary);
-                injectIndividualBeforeGroup(loser);
-            } else if (!preferChatOverModel && preferChatOverCharacterOrGroup) {
-                // Model beats chat, chat beats character/group: Model → Chat → Character/Group
-                cascade.push(primary);
-                cascade.push(SETTING_SOURCES.CHAT);
-                injectIndividualBeforeGroup(loser);
-            } else if (preferChatOverModel && !preferChatOverCharacterOrGroup) {
-                // Character/Group beats chat, chat beats model: Character/Group → Chat → Model
-                injectIndividualBeforeGroup(loser);
-                cascade.push(SETTING_SOURCES.CHAT);
-                cascade.push(primary);
-            } else {
-                // Both beat chat: Model → Character/Group → Chat
-                cascade.push(primary);
-                injectIndividualBeforeGroup(loser);
-                cascade.push(SETTING_SOURCES.CHAT);
+                cascade.push(source);
             }
         }
 
@@ -1231,17 +1243,29 @@ class SettingsManager {
         if (mode === AUTO_APPLY_MODES.NEVER) return false;
         if (mode === AUTO_APPLY_MODES.ALWAYS) return true;
 
-        // ASK mode - check if there are locks to apply
+        // ASK mode - check if there are locks to apply AND if they differ from current settings
         const context = this.chatContext.getCurrent();
         const resolved = this.priorityResolver.resolve(context, preferences);
 
         if (resolved.locks.profile || resolved.locks.preset || resolved.locks.template) {
-            const contextName = context.characterName || context.groupName || 'this context';
-            const result = await callGenericPopup(
-                `Apply locks for ${contextName}?`,
-                POPUP_TYPE.CONFIRM
-            );
-            return result === POPUP_RESULT.AFFIRMATIVE;
+            // Check if locks differ from current settings
+            const currentProfile = this.profileLocker.getCurrentProfile();
+            const currentPreset = this.presetLocker.getCurrentPreset();
+            const currentTemplate = await this.templateLocker.getCurrentTemplate();
+
+            const profileDiffers = resolved.locks.profile && resolved.locks.profile !== currentProfile;
+            const presetDiffers = resolved.locks.preset && resolved.locks.preset !== currentPreset;
+            const templateDiffers = resolved.locks.template && resolved.locks.template !== currentTemplate;
+
+            // Only ask if something would actually change
+            if (profileDiffers || presetDiffers || templateDiffers) {
+                const contextName = context.characterName || context.groupName || 'this context';
+                const result = await callGenericPopup(
+                    `Apply locks for ${contextName}?`,
+                    POPUP_TYPE.CONFIRM
+                );
+                return result === POPUP_RESULT.AFFIRMATIVE;
+            }
         }
 
         return false;
@@ -1462,26 +1486,41 @@ function onSettingsUpdated() {
 function updateDisplay() {
     if (!settingsManager) return;
 
+    const promptList = document.getElementById('completion_prompt_manager_list');
+    if (!promptList) return;
+
     try {
-        const resolved = settingsManager.getCurrentLocks();
-        const { locks, sources } = resolved;
+        const { locks, sources } = settingsManager.getCurrentLocks();
 
         // Remove existing display
         const existing = document.getElementById('stgl-status-indicator');
         if (existing) existing.remove();
 
         // Build display HTML
-        const parts = [];
-        if (locks.profile) parts.push(`<i class="fa-solid fa-plug"></i> ${locks.profile}`);
-        if (locks.preset) parts.push(`<i class="fa-solid fa-sliders"></i> ${locks.preset}`);
-        if (locks.template) parts.push(`<i class="fa-solid fa-file-lines"></i> ${locks.template}`);
-
-        if (parts.length === 0) {
-            if (DEBUG_MODE) console.log('STGL: No locks to display');
-            return;
+        let html = '';
+        const hasLock = locks.profile || locks.preset || locks.template;
+        
+        if (hasLock) {
+            html += '<div><span class="fa-solid fa-lock"></span> <b>Locked:</b> ';
+            const parts = [];
+            
+            if (locks.profile) {
+                parts.push(`<span><i class="fa-solid fa-plug" title="Profile"></i> ${locks.profile} <small class="text_muted">(${sources.profile})</small></span>`);
+            }
+            if (locks.preset) {
+                parts.push(`<span><i class="fa-solid fa-sliders" title="Preset"></i> ${locks.preset} <small class="text_muted">(${sources.preset})</small></span>`);
+            }
+            if (locks.template) {
+                // Fetch the template object to get its name!
+                const template = settingsManager.storage.getTemplate(locks.template);
+                const templateName = template ? template.name : 'Unknown Template';
+                parts.push(`<span><i class="fa-solid fa-file-lines" title="Template"></i> ${templateName} <small class="text_muted">(${sources.template})</small></span>`);
+            }
+            html += parts.join(' | ');
+            html += '</div>';
+        } else {
+            html = '<span class="fa-solid fa-circle-info"></span> No generation locks applied for this context.';
         }
-
-        const html = parts.join(' <span class="text_muted">|</span> ');
 
         // Create and inject indicator
         const indicator = document.createElement('div');
@@ -1489,11 +1528,8 @@ function updateDisplay() {
         indicator.className = 'stgl-status-indicator';
         indicator.innerHTML = `<small class="text_muted">${html}</small>`;
 
-        // Inject into extensions menu or appropriate location
-        const extensionsMenu = document.getElementById('extensionsMenu');
-        if (extensionsMenu) {
-            extensionsMenu.insertAdjacentElement('afterbegin', indicator);
-        }
+        // Insert before the prompt list, inside the prompt manager UI.
+        promptList.insertAdjacentElement('beforebegin', indicator);
 
         if (DEBUG_MODE) console.log('STGL: Display updated:', locks);
     } catch (error) {
@@ -1562,6 +1598,21 @@ const lockManagementTemplate = Handlebars.compile(`
             <span>{{label}}</span>
         </label>
         {{/each}}
+    </div>
+
+    <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter">
+        <h4 class="standoutHeader">📊 Priority Order:</h4>
+        <div class="marginTop10">
+            <small class="text_muted">Drag to reorder (top = highest priority)</small>
+            <ul id="stgl-priority-list" class="stgl-priority-list marginTop10">
+                {{#each priorityItems}}
+                <li class="stgl-priority-item" data-source="{{value}}">
+                    <i class="fa-solid fa-grip-vertical stgl-drag-handle"></i>
+                    <span class="stgl-priority-label">{{label}}</span>
+                </li>
+                {{/each}}
+            </ul>
+        </div>
     </div>
 
     <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter">
@@ -1660,18 +1711,27 @@ async function getPopupContent() {
         { id: 'stgl-enable-character', label: 'Remember per group', checked: preferences.enableGroupMemory },
         { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
         { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
-        { id: 'stgl-prefer-chat-over-character-group', label: 'Prefer chat over character/group', checked: preferences.preferChatOverCharacterOrGroup },
-        { id: 'stgl-prefer-chat-over-model', label: 'Prefer chat over model', checked: preferences.preferChatOverModel },
         { id: 'stgl-prefer-individual', label: 'Prefer individual character in group', checked: preferences.preferIndividualCharacterInGroup },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ] : [
         { id: 'stgl-enable-character', label: 'Remember per character', checked: preferences.enableCharacterMemory },
         { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
         { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
-        { id: 'stgl-prefer-chat-over-character-group', label: 'Prefer chat over character/group', checked: preferences.preferChatOverCharacterOrGroup },
-        { id: 'stgl-prefer-chat-over-model', label: 'Prefer chat over model', checked: preferences.preferChatOverModel },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ];
+
+    // Priority order - map sources to labels
+    const sourceLabels = {
+        [SETTING_SOURCES.CHAT]: '💬 Chat',
+        [SETTING_SOURCES.CHARACTER]: isGroupChat ? '👥 Group' : '👤 Character',
+        [SETTING_SOURCES.MODEL]: '🤖 Model'
+    };
+
+    const priorityItems = (preferences.priorityOrder || [SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL])
+        .map(source => ({
+            value: source,
+            label: sourceLabels[source] || source
+        }));
 
     // Auto-apply options
     const autoApplyOptions = [
@@ -1701,6 +1761,7 @@ async function getPopupContent() {
         groupName: context.groupName,
         modelName: context.modelName,
         checkboxes,
+        priorityItems,
         autoApplyOptions,
         lockingModeOptions,
         characterLocks: formatLockInfo(characterLocks),
@@ -1723,6 +1784,52 @@ async function refreshPopupAfterSave() {
         await showLockManagementPopup();
         updateDisplay();
     }, 200);
+}
+
+/**
+ * Initialize drag-and-drop for priority list
+ */
+function initializePriorityDragDrop(popupElement) {
+    const priorityList = popupElement.querySelector('#stgl-priority-list');
+    if (!priorityList) return;
+
+    let draggedItem = null;
+
+    // Add drag event listeners to all items
+    const items = priorityList.querySelectorAll('.stgl-priority-item');
+    items.forEach(item => {
+        item.setAttribute('draggable', 'true');
+
+        item.addEventListener('dragstart', (e) => {
+            draggedItem = item;
+            item.style.opacity = '0.5';
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        item.addEventListener('dragend', () => {
+            item.style.opacity = '1';
+            draggedItem = null;
+        });
+
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            if (draggedItem && item !== draggedItem) {
+                const rect = item.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                const insertBefore = e.clientY < midpoint;
+
+                if (insertBefore) {
+                    priorityList.insertBefore(draggedItem, item);
+                } else {
+                    priorityList.insertBefore(draggedItem, item.nextSibling);
+                }
+            }
+        });
+    });
+
+    if (DEBUG_MODE) console.log('STGL: Drag-drop initialized for priority list');
 }
 
 /**
@@ -1924,6 +2031,7 @@ async function showLockManagementPopup() {
     });
 
     const popupOptions = {
+        wide: true,
         allowVerticalScrolling: true,
         customButtons,
         cancelButton: 'Close',
@@ -1934,6 +2042,11 @@ async function showLockManagementPopup() {
     try {
         currentPopupInstance = new Popup(contentWithHeader, POPUP_TYPE.TEXT, '', popupOptions);
         await currentPopupInstance.show();
+
+        // Initialize drag-drop after popup is rendered
+        if (currentPopupInstance?.dlg) {
+            initializePriorityDragDrop(currentPopupInstance.dlg);
+        }
     } catch (error) {
         console.error('STGL: Error showing popup:', error);
         currentPopupInstance = null;
@@ -1953,8 +2066,6 @@ async function handlePopupClose(popup) {
             'stgl-enable-character': 'enableCharacterMemory',
             'stgl-enable-chat': 'enableChatMemory',
             'stgl-enable-model': 'enableModelMemory',
-            'stgl-prefer-chat-over-character-group': 'preferChatOverCharacterOrGroup',
-            'stgl-prefer-chat-over-model': 'preferChatOverModel',
             'stgl-prefer-individual': 'preferIndividualCharacterInGroup',
             'stgl-show-notifications': 'showNotifications'
         };
@@ -1964,6 +2075,15 @@ async function handlePopupClose(popup) {
             if (checkbox) {
                 storage.updatePreference(settingKey, checkbox.checked);
             }
+        }
+
+        // Save priority order from drag list
+        const priorityList = popupElement.querySelector('#stgl-priority-list');
+        if (priorityList) {
+            const priorityOrder = Array.from(priorityList.querySelectorAll('.stgl-priority-item'))
+                .map(item => item.getAttribute('data-source'));
+            storage.updatePreference('priorityOrder', priorityOrder);
+            if (DEBUG_MODE) console.log('STGL: Priority order saved:', priorityOrder);
         }
 
         // Save auto-apply mode
@@ -2106,6 +2226,16 @@ async function init() {
         injectMenuButton();
         injectPromptTemplateManagerButton();
 
+        // Hook into promptManager to keep the display updated.
+        if (promptManager && promptManager.render) {
+            const originalRender = promptManager.render.bind(promptManager);
+            promptManager.render = async function(...args) {
+                await originalRender(...args);
+                updateDisplay(); // Call our new display function after ST renders.
+            };
+            console.log('STGL: Hooked into promptManager.render for UI updates.');
+        }
+
         // Expose template manager globally (like CCPM)
         window.promptTemplateManager = {
             listTemplates() {
@@ -2137,6 +2267,9 @@ async function init() {
                 return false;
             }
         };
+
+        // Expose settingsManager globally for promptManager.js to access
+        window.stglSettingsManager = settingsManager;
 
         // Initial context check
         settingsManager.onContextChanged();
