@@ -12,6 +12,8 @@ import { selected_group, groups, editGroup } from '../../../group-chats.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { executeSlashCommandsWithOptions } from '../../../slash-commands.js';
 import { oai_settings, promptManager } from '../../../openai.js';
+import { isMobile } from '../../../RossAscends-mods.js';
+import { getSortableDelay } from '../../../utils.js';
 import { MigrationManager } from './migration.js';
 import { injectPromptTemplateManagerButton } from './promptManager.js';
 
@@ -1591,7 +1593,7 @@ const lockManagementTemplate = Handlebars.compile(`
         <span>Status: <strong>{{statusText}}</strong></span>
     </div>
 
-    <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter" style="text-align: center;">
+    <div class="completion_prompt_manager_popup_entry_form_control">
         {{#each checkboxes}}
         <label class="checkbox_label">
             <input type="checkbox" id="{{id}}" {{#if checked}}checked{{/if}}>
@@ -1600,22 +1602,22 @@ const lockManagementTemplate = Handlebars.compile(`
         {{/each}}
     </div>
 
-    <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter">
+    <div class="completion_prompt_manager_popup_entry_form_control">
         <h4 class="standoutHeader">📊 Priority Order:</h4>
         <div class="marginTop10">
             <small class="text_muted">Drag to reorder (top = highest priority)</small>
-            <ul id="stgl-priority-list" class="stgl-priority-list marginTop10">
+            <ul id="stgl-priority-list" class="marginTop10">
                 {{#each priorityItems}}
-                <li class="stgl-priority-item" data-source="{{value}}">
-                    <i class="fa-solid fa-grip-vertical stgl-drag-handle"></i>
-                    <span class="stgl-priority-label">{{label}}</span>
+                <li class="completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable" data-source="{{value}}">
+                    <span class="drag-handle">☰</span>
+                    <span>{{label}}</span>
                 </li>
                 {{/each}}
             </ul>
         </div>
     </div>
 
-    <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter">
+    <div class="completion_prompt_manager_popup_entry_form_control">
         <h4 class="standoutHeader">⚙️ Auto-apply Mode:</h4>
         <div class="marginTop10">
             {{#each autoApplyOptions}}
@@ -1627,7 +1629,7 @@ const lockManagementTemplate = Handlebars.compile(`
         </div>
     </div>
 
-    <div class="completion_prompt_manager_popup_entry_form_control flex-container flexFlowColumn justifyCenter">
+    <div class="completion_prompt_manager_popup_entry_form_control">
         <h4 class="standoutHeader">🔒 Locking Mode:</h4>
         <div class="marginTop10">
             {{#each lockingModeOptions}}
@@ -1787,49 +1789,40 @@ async function refreshPopupAfterSave() {
 }
 
 /**
- * Initialize drag-and-drop for priority list
+ * Initialize drag-and-drop for priority list using jQuery UI sortable
+ * Following ST's PromptManager pattern exactly
  */
-function initializePriorityDragDrop(popupElement) {
-    const priorityList = popupElement.querySelector('#stgl-priority-list');
-    if (!priorityList) return;
+function initializePriorityDragDrop() {
+    const $priorityList = $('#stgl-priority-list');
 
-    let draggedItem = null;
+    if (!$priorityList.length) {
+        console.warn('STGL: Priority list element not found');
+        return;
+    }
 
-    // Add drag event listeners to all items
-    const items = priorityList.querySelectorAll('.stgl-priority-item');
-    items.forEach(item => {
-        item.setAttribute('draggable', 'true');
+    if (typeof $.fn.sortable !== 'function') {
+        console.error('STGL: jQuery UI sortable is not available');
+        return;
+    }
 
-        item.addEventListener('dragstart', (e) => {
-            draggedItem = item;
-            item.style.opacity = '0.5';
-            e.dataTransfer.effectAllowed = 'move';
-        });
+    // Use ST's exact sortable pattern
+    $priorityList.sortable({
+        delay: getSortableDelay(),  // 50ms desktop, 750ms mobile
+        handle: isMobile() ? '.drag-handle' : null,  // Allow dragging whole item on desktop
+        items: '.completion_prompt_manager_prompt_draggable',
+        update: function(event, ui) {
+            // Get updated order from DOM
+            const priorityOrder = $priorityList.sortable('toArray', { attribute: 'data-source' });
 
-        item.addEventListener('dragend', () => {
-            item.style.opacity = '1';
-            draggedItem = null;
-        });
+            // Update settings
+            extension_settings.stgl.priorityOrder = priorityOrder;
+            saveSettingsDebounced();
 
-        item.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-
-            if (draggedItem && item !== draggedItem) {
-                const rect = item.getBoundingClientRect();
-                const midpoint = rect.top + rect.height / 2;
-                const insertBefore = e.clientY < midpoint;
-
-                if (insertBefore) {
-                    priorityList.insertBefore(draggedItem, item);
-                } else {
-                    priorityList.insertBefore(draggedItem, item.nextSibling);
-                }
-            }
-        });
+            if (DEBUG_MODE) console.log('STGL: Priority order updated:', priorityOrder);
+        }
     });
 
-    if (DEBUG_MODE) console.log('STGL: Drag-drop initialized for priority list');
+    if (DEBUG_MODE) console.log('STGL: Sortable initialized for priority list');
 }
 
 /**
@@ -2043,10 +2036,8 @@ async function showLockManagementPopup() {
         currentPopupInstance = new Popup(contentWithHeader, POPUP_TYPE.TEXT, '', popupOptions);
         await currentPopupInstance.show();
 
-        // Initialize drag-drop after popup is rendered
-        if (currentPopupInstance?.dlg) {
-            initializePriorityDragDrop(currentPopupInstance.dlg);
-        }
+        // Initialize drag-drop after popup is rendered (following ST's pattern)
+        initializePriorityDragDrop();
     } catch (error) {
         console.error('STGL: Error showing popup:', error);
         currentPopupInstance = null;
@@ -2080,7 +2071,7 @@ async function handlePopupClose(popup) {
         // Save priority order from drag list
         const priorityList = popupElement.querySelector('#stgl-priority-list');
         if (priorityList) {
-            const priorityOrder = Array.from(priorityList.querySelectorAll('.stgl-priority-item'))
+            const priorityOrder = Array.from(priorityList.querySelectorAll('.completion_prompt_manager_prompt_draggable'))
                 .map(item => item.getAttribute('data-source'));
             storage.updatePreference('priorityOrder', priorityOrder);
             if (DEBUG_MODE) console.log('STGL: Priority order saved:', priorityOrder);

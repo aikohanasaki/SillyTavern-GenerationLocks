@@ -308,30 +308,292 @@ window.stglViewPrompts = async function(templateId) {
         return;
     }
 
-    const prompts = Object.entries(template.prompts).map(([identifier, prompt]) => ({
-        identifier,
-        name: prompt.name || identifier,
-        content: prompt.content || ''
-    }));
+    // Build list ordered by promptOrder if available
+    let orderedPrompts = [];
+    if (template.promptOrder && Array.isArray(template.promptOrder) && template.promptOrder.length > 0) {
+        orderedPrompts = template.promptOrder
+            .map(entry => template.prompts[entry.identifier])
+            .filter(prompt => prompt);
+    } else {
+        orderedPrompts = Object.values(template.prompts);
+    }
+
+    if (orderedPrompts.length === 0) {
+        toastr.info('This template contains no prompts');
+        return;
+    }
 
     const content = document.createElement('div');
     content.innerHTML = `
-        <h3>Prompts in "${escapeHtml(template.name)}"</h3>
-        <div class="flex-container flexFlowColumn flexGap10 overflowYAuto" style="max-height: 60vh;">
-            ${prompts.map(p => `
-                <div class="flex-container flexFlowColumn padding10" style="border: 1px solid var(--SmartThemeBorderColor); border-radius: 5px;">
-                    <div class="flex-container alignItemsCenter justifySpaceBetween">
-                        <strong>${escapeHtml(p.name)}</strong>
-                        <small class="text_muted">${p.identifier}</small>
-                    </div>
-                    <textarea class="text_pole marginTop10" rows="4" readonly>${escapeHtml(p.content)}</textarea>
-                </div>
-            `).join('')}
+        <div class="flex-container flexFlowColumn" style="gap: 10px;">
+            <div class="title_restorable">
+                <h3>${escapeHtml(template.name)}</h3>
+            </div>
+            ${template.description ? `<div class="text_muted">${escapeHtml(template.description)}</div>` : ''}
+
+            <ul id="stgl-prompt-order-list" class="text_pole" style="list-style: none; padding: 0; margin: 0; max-height: 60vh; overflow-y: auto;">
+                <li class="completion_prompt_manager_list_head">
+                    <span>Name</span>
+                    <span></span>
+                    <span>Role</span>
+                </li>
+                <li style="grid-column: 1 / -1; margin: 0.5em 0;">
+                    <hr style="width: 100%; background: var(--SmartThemeBorderColor);">
+                </li>
+                ${orderedPrompts.map(prompt => {
+                    const isMarker = prompt.marker;
+                    const isSystemPrompt = prompt.system_prompt;
+                    const isInjectionPrompt = prompt.injection_position === 1;
+                    const promptRoles = {
+                        assistant: { roleIcon: 'fa-robot', roleTitle: 'Prompt will be sent as Assistant' },
+                        user: { roleIcon: 'fa-user', roleTitle: 'Prompt will be sent as User' },
+                    };
+                    const iconLookup = prompt.role === 'system' && prompt.system_prompt ? '' : prompt.role;
+                    const roleIcon = promptRoles[iconLookup]?.roleIcon || '';
+                    const roleTitle = promptRoles[iconLookup]?.roleTitle || '';
+
+                    const nameDisplay = isMarker
+                        ? `<span title="${escapeHtml(prompt.name || prompt.identifier)}">${escapeHtml(prompt.name || prompt.identifier)}</span>`
+                        : `<a class="stgl-expand-prompt" data-identifier="${escapeHtml(prompt.identifier)}">${escapeHtml(prompt.name || prompt.identifier)}</a>`;
+
+                    const editButton = !isMarker
+                        ? `<span class="stgl-edit-prompt fa-solid fa-pencil fa-xs" data-identifier="${escapeHtml(prompt.identifier)}" title="Edit prompt" style="margin-left: 8px; opacity: 0.4; cursor: pointer;"></span>`
+                        : '';
+
+                    return `
+                        <li class="completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable ${isMarker ? 'ccpm_prompt_manager_marker' : ''}" data-identifier="${escapeHtml(prompt.identifier)}">
+                            <span class="drag-handle">☰</span>
+                            <span class="completion_prompt_manager_prompt_name">
+                                ${isMarker ? '<span class="fa-fw fa-solid fa-thumb-tack" title="Marker"></span>' : ''}
+                                ${!isMarker && isSystemPrompt ? '<span class="fa-fw fa-solid fa-square-poll-horizontal" title="System Prompt"></span>' : ''}
+                                ${!isMarker && !isSystemPrompt ? '<span class="fa-fw fa-solid fa-asterisk" title="User Prompt"></span>' : ''}
+                                ${isInjectionPrompt ? '<span class="fa-fw fa-solid fa-syringe" title="In-Chat Injection"></span>' : ''}
+                                ${nameDisplay}
+                                ${editButton}
+                                ${roleIcon ? `<span data-role="${escapeHtml(prompt.role)}" class="fa-xs fa-solid ${roleIcon}" title="${roleTitle}"></span>` : ''}
+                                ${isInjectionPrompt ? `<small class="prompt-manager-injection-depth">@ ${escapeHtml(prompt.injection_depth)}</small>` : ''}
+                            </span>
+                            <span></span>
+                            <span class="stgl_prompt_role">${escapeHtml(prompt.role || 'system')}</span>
+                        </li>
+                        ${!isMarker ? `
+                            <li class="inline-drawer stgl_prompt_drawer" data-identifier="${escapeHtml(prompt.identifier)}" style="grid-column: 1 / -1; margin: 0 0 10px 30px;">
+                                <div class="inline-drawer-content text_pole padding10" style="background: var(--black30a); display: none;">
+                                    ${prompt.injection_position === 1 ? `
+                                        <div class="flex-container flexGap10 marginBot5 fontsize90p text_muted">
+                                            <span><strong>Position:</strong> Absolute (In-Chat)</span>
+                                            <span><strong>Depth:</strong> ${prompt.injection_depth || 4}</span>
+                                            <span><strong>Order:</strong> ${prompt.injection_order || 100}</span>
+                                        </div>
+                                    ` : ''}
+                                    <div class="fontsize90p" style="white-space: pre-wrap; font-family: monospace; max-height: 300px; overflow-y: auto;">
+${escapeHtml(prompt.content || '(empty)')}
+                                    </div>
+                                </div>
+                            </li>
+                        ` : ''}
+                    `;
+                }).join('')}
+            </ul>
+
+            <div class="text_muted fontsize90p">
+                <i class="fa-solid fa-info-circle"></i> Drag prompts by the handle to reorder. Click prompt names to expand/collapse content.
+            </div>
         </div>
-        <p class="text_muted marginTop10">To edit prompts, apply this template and modify them in SillyTavern's Prompt Manager, then create a new template.</p>
     `;
 
-    await callGenericPopup(content, POPUP_TYPE.TEXT, '', { okButton: 'Close' });
+    const popup = new Popup(content, POPUP_TYPE.CONFIRM, '', {
+        okButton: 'Save Order',
+        cancelButton: 'Close',
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        onOpen: () => {
+            // Setup click handlers for expanding/collapsing prompts
+            document.querySelectorAll('.stgl-expand-prompt').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const identifier = link.dataset.identifier;
+                    const drawerContent = document.querySelector(`.stgl_prompt_drawer[data-identifier="${identifier}"] .inline-drawer-content`);
+                    if (drawerContent) {
+                        const isVisible = drawerContent.style.display !== 'none';
+                        drawerContent.style.display = isVisible ? 'none' : 'block';
+                    }
+                });
+            });
+
+            // Setup click handlers for editing prompts
+            document.querySelectorAll('.stgl-edit-prompt').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const identifier = btn.dataset.identifier;
+                    window.stglEditPromptInTemplate(templateId, identifier);
+                });
+            });
+
+            // Make the list sortable using jQuery UI
+            $('#stgl-prompt-order-list').sortable({
+                delay: 30,
+                handle: '.drag-handle',
+                items: '.completion_prompt_manager_prompt_draggable',
+                update: function() {
+                    // Order changed - will be saved if user clicks Save
+                }
+            });
+        },
+        onClosing: async (popup) => {
+            if (popup.result === POPUP_RESULT.AFFIRMATIVE) {
+                // Save the new order
+                const newOrder = [];
+                document.querySelectorAll('.completion_prompt_manager_prompt_draggable').forEach(li => {
+                    const identifier = li.dataset.identifier;
+                    const originalEntry = template.promptOrder?.find(e => e.identifier === identifier);
+                    newOrder.push({
+                        identifier: identifier,
+                        enabled: originalEntry?.enabled ?? true
+                    });
+                });
+
+                // Update template's promptOrder
+                window.promptTemplateManager.updateTemplate(templateId, {
+                    promptOrder: newOrder
+                });
+
+                toastr.success('Prompt order saved');
+                return true;
+            }
+            return true;
+        }
+    });
+
+    await popup.show();
+};
+
+/**
+ * Edit a prompt within a template using ST's existing edit form
+ */
+window.stglEditPromptInTemplate = async function(templateId, promptIdentifier) {
+    const template = window.promptTemplateManager.getTemplate(templateId);
+    if (!template) {
+        toastr.error('Template not found');
+        return;
+    }
+
+    const prompt = template.prompts[promptIdentifier];
+    if (!prompt) {
+        toastr.error('Prompt not found in template');
+        return;
+    }
+
+    // Clone ST's existing edit form from the DOM
+    const formContainer = document.getElementById('completion_prompt_manager_popup_edit');
+    if (!formContainer) {
+        toastr.error('Edit form container not found');
+        return;
+    }
+
+    // Clone ST's form to use in our popup
+    const clonedForm = formContainer.cloneNode(true);
+    clonedForm.id = 'stgl_temp_edit_form';
+    clonedForm.style.display = 'block';
+
+    let savedData = null;
+
+    const editPopup = new Popup(clonedForm, POPUP_TYPE.CONFIRM, '', {
+        okButton: 'Save',
+        cancelButton: 'Cancel',
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+        onOpen: () => {
+            // Re-populate after clone (DOM elements are new)
+            const clonedNameField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_name');
+            const clonedRoleField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_role');
+            const clonedPromptField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt');
+            const clonedInjectionPositionField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
+            const clonedInjectionDepthField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
+            const clonedInjectionOrderField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
+            const clonedInjectionTriggerField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
+            const clonedDepthBlock = clonedForm.querySelector('#completion_prompt_manager_depth_block');
+            const clonedOrderBlock = clonedForm.querySelector('#completion_prompt_manager_order_block');
+            const clonedForbidOverridesField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
+
+            if (clonedNameField) clonedNameField.value = prompt.name || '';
+            if (clonedRoleField) clonedRoleField.value = prompt.role || 'system';
+            if (clonedPromptField) clonedPromptField.value = prompt.content || '';
+            if (clonedInjectionPositionField) clonedInjectionPositionField.value = (prompt.injection_position ?? 0).toString();
+            if (clonedInjectionDepthField) clonedInjectionDepthField.value = (prompt.injection_depth ?? 4).toString();
+            if (clonedInjectionOrderField) clonedInjectionOrderField.value = (prompt.injection_order ?? 100).toString();
+
+            if (clonedInjectionTriggerField) {
+                Array.from(clonedInjectionTriggerField.options).forEach(option => {
+                    option.selected = Array.isArray(prompt.injection_trigger) && prompt.injection_trigger.includes(option.value);
+                });
+            }
+
+            if (clonedDepthBlock && clonedOrderBlock) {
+                const showFields = clonedInjectionPositionField && clonedInjectionPositionField.value === '1';
+                clonedDepthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+                clonedOrderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+
+                // Add change listener for injection position
+                if (clonedInjectionPositionField) {
+                    clonedInjectionPositionField.addEventListener('change', (e) => {
+                        const showFields = e.target.value === '1';
+                        clonedDepthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+                        clonedOrderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+                    });
+                }
+            }
+
+            if (clonedForbidOverridesField) clonedForbidOverridesField.checked = prompt.forbid_overrides ?? false;
+        },
+        onClosing: (popup) => {
+            if (popup.result === POPUP_RESULT.AFFIRMATIVE) {
+                // Capture form values
+                const clonedNameField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_name');
+                const clonedRoleField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_role');
+                const clonedPromptField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt');
+                const clonedInjectionPositionField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
+                const clonedInjectionDepthField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
+                const clonedInjectionOrderField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
+                const clonedInjectionTriggerField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
+                const clonedForbidOverridesField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
+
+                savedData = {
+                    name: clonedNameField?.value || prompt.name,
+                    role: clonedRoleField?.value || prompt.role,
+                    content: clonedPromptField?.value || prompt.content,
+                    injection_position: clonedInjectionPositionField ? Number(clonedInjectionPositionField.value) : prompt.injection_position,
+                    injection_depth: clonedInjectionDepthField ? Number(clonedInjectionDepthField.value) : prompt.injection_depth,
+                    injection_order: clonedInjectionOrderField ? Number(clonedInjectionOrderField.value) : prompt.injection_order,
+                    injection_trigger: clonedInjectionTriggerField ? Array.from(clonedInjectionTriggerField.selectedOptions).map(opt => opt.value) : prompt.injection_trigger,
+                    forbid_overrides: clonedForbidOverridesField?.checked ?? prompt.forbid_overrides,
+                };
+            }
+            return true;
+        }
+    });
+
+    const result = await editPopup.show();
+
+    if (result && savedData) {
+        // Update the prompt in the template
+        Object.assign(template.prompts[promptIdentifier], savedData);
+        template.updatedAt = new Date().toISOString();
+
+        // Save via storage
+        const settings = extension_settings.stgl;
+        if (!settings.templates) settings.templates = {};
+        settings.templates[template.id] = template;
+        saveSettingsDebounced();
+
+        toastr.success('Prompt updated in template');
+
+        // Refresh the viewer
+        await window.stglViewPrompts(templateId);
+    }
 };
 
 /**

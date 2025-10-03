@@ -1,5 +1,11 @@
 /* SillyTavern Generation Locks (STGL) Styles */
 
+/* Fix popup button wrapping */
+.popup-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
 /* Status indicator in extensions menu */
 .stgl-status-indicator {
     padding: 8px 12px;
@@ -58,17 +64,14 @@
     color: var(--SmartThemeBodyColor);
 }
 
-/* Radio and checkbox labels */
+/* Radio and checkbox labels - following ST base styles */
 .radio_label,
 .checkbox_label {
-    display: block;
-    margin: 5px 0;
+    display: flex;
+    flex-direction: row;
+    column-gap: 5px;
+    align-items: baseline;
     cursor: pointer;
-}
-
-.radio_label input,
-.checkbox_label input {
-    margin-right: 8px;
 }
 
 /* Status text colors */
@@ -80,8 +83,8 @@
     color: var(--SmartThemeQuoteColor);
 }
 
-/* Priority order drag-and-drop list */
-.stgl-priority-list {
+/* Priority order list - minimal styling, reusing ST's prompt manager classes */
+#stgl-priority-list {
     list-style: none;
     padding: 0;
     margin: 0;
@@ -90,39 +93,33 @@
     border-radius: 5px;
 }
 
-.stgl-priority-item {
+#stgl-priority-list li {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 15px;
     background: var(--SmartThemeBlurTintColor);
     border-bottom: 1px solid var(--SmartThemeBorderColor);
-    cursor: move;
-    transition: background 0.2s ease;
 }
 
-.stgl-priority-item:last-child {
+#stgl-priority-list li:last-child {
     border-bottom: none;
 }
 
-.stgl-priority-item:hover {
+#stgl-priority-list li:hover {
     background: var(--black50a);
 }
 
-.stgl-priority-item.dragging {
-    opacity: 0.5;
+/* Prompt editing UI - reuses ST's patterns */
+.stgl-expand-prompt {
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
 }
 
-.stgl-drag-handle {
-    color: var(--grey70);
-    cursor: grab;
+.stgl-expand-prompt:hover {
+    text-decoration: underline;
 }
 
-.stgl-drag-handle:active {
-    cursor: grabbing;
-}
-
-.stgl-priority-label {
-    flex: 1;
-    font-weight: 500;
+.stgl-edit-prompt:hover {
+    opacity: 1 !important;
 }
