@@ -1,12 +1,12 @@
 {
     "display_name": "Generation Locks",
-    "loading_order": 100,
+    "loading_order": 30,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "Aikobots",
+    "author": "aikohanasaki",
     "version": "1.0.0",
-    "homePage": "https://github.com/Aikobots/SillyTavern-GenerationLocks",
+    "homePage": "https://github.com/aikohanasaki/SillyTavern-GenerationLocks",
     "description": "Advanced generation settings management with multi-dimensional locking for profiles, presets, and templates. Combines connection profile management with completion template control."
 }

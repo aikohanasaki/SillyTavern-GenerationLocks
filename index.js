@@ -9,9 +9,8 @@ import { extension_settings, saveMetadataDebounced, getContext } from '../../../
 import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popup.js';
 import { lodash, Handlebars } from '../../../../lib.js';
 import { selected_group, groups, editGroup } from '../../../group-chats.js';
-import { getPresetManager } from '../../../preset-manager.js';
 import { executeSlashCommandsWithOptions } from '../../../slash-commands.js';
-import { oai_settings, promptManager } from '../../../openai.js';
+import { oai_settings, promptManager, getChatCompletionModel } from '../../../openai.js';
 import { isMobile } from '../../../RossAscends-mods.js';
 import { getSortableDelay } from '../../../utils.js';
 import { MigrationManager } from './migration.js';
@@ -56,9 +55,6 @@ const LOCKABLE_ITEMS = {
 
 const DEFAULT_SETTINGS = {
     moduleSettings: {
-        enableCharacterMemory: true,
-        enableChatMemory: true,
-        enableGroupMemory: true,
         preferIndividualCharacterInGroup: false,
         showNotifications: true,
         autoApplyOnContextChange: AUTO_APPLY_MODES.ASK,
@@ -207,8 +203,7 @@ class ChatContext {
 
     _getCurrentModel() {
         try {
-            // Read from oai_settings which is updated by /model command
-            return oai_settings?.model || null;
+            return getChatCompletionModel() || null;
         } catch (error) {
             if (DEBUG_MODE) console.warn('STGL: Error getting current model:', error);
             return null;
@@ -1710,15 +1705,9 @@ async function getPopupContent() {
 
     // Build checkboxes based on context
     const checkboxes = isGroupChat ? [
-        { id: 'stgl-enable-character', label: 'Remember per group', checked: preferences.enableGroupMemory },
-        { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
-        { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
         { id: 'stgl-prefer-individual', label: 'Prefer individual character in group', checked: preferences.preferIndividualCharacterInGroup },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ] : [
-        { id: 'stgl-enable-character', label: 'Remember per character', checked: preferences.enableCharacterMemory },
-        { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
-        { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ];
 
@@ -1814,9 +1803,9 @@ function initializePriorityDragDrop() {
             // Get updated order from DOM
             const priorityOrder = $priorityList.sortable('toArray', { attribute: 'data-source' });
 
-            // Update settings
-            extension_settings.stgl.priorityOrder = priorityOrder;
-            saveSettingsDebounced();
+            // Update settings using StorageAdapter to ensure consistency
+            const storage = new StorageAdapter();
+            storage.updatePreference('priorityOrder', priorityOrder);
 
             if (DEBUG_MODE) console.log('STGL: Priority order updated:', priorityOrder);
         }
@@ -2054,9 +2043,6 @@ async function handlePopupClose(popup) {
 
         // Save checkbox preferences
         const checkboxMappings = {
-            'stgl-enable-character': 'enableCharacterMemory',
-            'stgl-enable-chat': 'enableChatMemory',
-            'stgl-enable-model': 'enableModelMemory',
             'stgl-prefer-individual': 'preferIndividualCharacterInGroup',
             'stgl-show-notifications': 'showNotifications'
         };
@@ -2235,8 +2221,8 @@ async function init() {
             getTemplate(id) {
                 return storage.getExtensionSettings().templates?.[id] || null;
             },
-            createFromCurrent(name, description) {
-                const template = TemplateOps.createFromCurrent({ name, description });
+            createFromCurrent(name, description, includePrompts = null) {
+                const template = TemplateOps.createFromCurrent({ name, description, includePrompts });
                 const settings = storage.getExtensionSettings();
                 if (!settings.templates) settings.templates = {};
                 settings.templates[template.id] = template;

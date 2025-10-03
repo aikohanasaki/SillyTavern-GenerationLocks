@@ -27,7 +27,7 @@ export class STCLMigration {
      * @param {Object} stglStorage - STGL StorageAdapter instance
      * @returns {Object} Migration report
      */
-    static migrate(stglStorage) {
+    static async migrate(stglStorage) {
         const report = {
             characterLocks: 0,
             chatLocks: 0,
@@ -70,7 +70,7 @@ export class STCLMigration {
                     if (group.stcl_settings) {
                         try {
                             const stglLock = this._convertSTCLToSTGL(group.stcl_settings);
-                            stglStorage.setGroupLock(group.id, stglLock);
+                            await stglStorage.setGroupLock(group.id, stglLock);
                             report.groupLocks++;
                         } catch (error) {
                             report.errors.push(`Group ${group.id}: ${error.message}`);
@@ -149,7 +149,7 @@ export class CCPMMigration {
      * @param {Object} stglStorage - STGL StorageAdapter instance
      * @returns {Object} Migration report
      */
-    static migrate(stglStorage) {
+    static async migrate(stglStorage) {
         const report = {
             templates: 0,
             characterLocks: 0,
@@ -214,7 +214,7 @@ export class CCPMMigration {
                                 const mergedLock = existingLock
                                     ? { ...existingLock, template: group.ccpm_template_lock }  // Merge
                                     : this._convertCCPMToSTGL(group.ccpm_template_lock);        // CCPM only
-                                stglStorage.setGroupLock(group.id, mergedLock);
+                                await stglStorage.setGroupLock(group.id, mergedLock);
                                 report.groupLocks++;
                             } catch (error) {
                                 report.errors.push(`Group ${group.id}: ${error.message}`);
@@ -327,14 +327,14 @@ export class MigrationManager {
         // Migrate STCL first (provides profile + preset)
         if (STCLMigration.hasSTCLData()) {
             console.log('STGL: Found STCL data, migrating...');
-            report.stcl.data = STCLMigration.migrate(stglStorage);
+            report.stcl.data = await STCLMigration.migrate(stglStorage);
             report.stcl.migrated = true;
         }
 
         // Migrate CCPM second (provides templates, automatically merges with existing STCL locks)
         if (CCPMMigration.hasCCPMData()) {
             console.log('STGL: Found CCPM data, migrating...');
-            report.ccpm.data = CCPMMigration.migrate(stglStorage);
+            report.ccpm.data = await CCPMMigration.migrate(stglStorage);
             report.ccpm.migrated = true;
         }
 

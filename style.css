@@ -123,3 +123,59 @@
 .stgl-edit-prompt:hover {
     opacity: 1 !important;
 }
+
+/* Prompt template viewer - grid layout for prompt list */
+#stgl-prompt-order-list {
+    display: flex;
+    flex-direction: column;
+    min-height: 300px;
+}
+
+#stgl-prompt-order-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    margin-bottom: 0.5em;
+    width: 100%;
+    column-gap: 10px;
+}
+
+#stgl-prompt-order-list li.completion_prompt_manager_prompt {
+    align-items: center;
+    padding: 0.5em;
+    border: 1px solid var(--SmartThemeBorderColor);
+}
+
+/* Drag handle positioning */
+#stgl-prompt-order-list .completion_prompt_manager_prompt .drag-handle:not(.ui-sortable-handle) {
+    display: none;
+}
+
+#stgl-prompt-order-list .completion_prompt_manager_prompt:has(.drag-handle.ui-sortable-handle) {
+    position: relative;
+    padding-left: 20px;
+}
+
+#stgl-prompt-order-list .completion_prompt_manager_prompt .drag-handle {
+    position: absolute;
+    height: 100%;
+    top: 0;
+    padding: 0 5px;
+    display: flex;
+    align-items: center;
+}
+
+/* Prompt drawer for expanded content */
+.stgl_prompt_drawer {
+    list-style: none;
+    padding: 0;
+}
+
+/* Marker styling */
+.stgl_prompt_manager_marker {
+    opacity: 0.7;
+}
+
+.stgl_prompt_manager_marker .completion_prompt_manager_prompt_name span:not(.fa-solid):not(.fa-thumb-tack) {
+    font-style: italic;
+    cursor: default;
+}

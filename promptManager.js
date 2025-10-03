@@ -108,13 +108,8 @@ async function renderTemplateList() {
             <div class="flex-container flexFlowColumn padding10 marginBot10" style="border: 1px solid var(--SmartThemeBorderColor); border-radius: 5px;">
                 <div class="flex-container alignItemsCenter justifySpaceBetween">
                     <div class="flex1">
-                        <div class="fontsize120p">
-                            ${escapeHtml(t.name)}
-                        </div>
-                        <div class="fontsize90p text_muted flex-container flexGap10">
-                            <span class="toggleEnabled">${promptCount} prompt${promptCount !== 1 ? 's' : ''}</span>
-                            <span>Created: ${createdDate}</span>
-                        </div>
+                        ${escapeHtml(t.name)} <small>(Created: ${createdDate})</small>
+                        ${t.description ? `<div class="text_muted fontsize90p marginBot10">${escapeHtml(t.description)}</div>` : ''}
                     </div>
                     <div class="flex-container flexGap2">
                         <div class="menu_button menu_button_icon interactable stgl-apply-btn" data-template-id="${escapeHtml(t.id)}" title="Apply Template" style="width: 32px; height: 32px; padding: 0;">
@@ -133,12 +128,6 @@ async function renderTemplateList() {
                             <i class="fa-solid fa-trash"></i>
                         </div>
                     </div>
-                </div>
-                ${t.description ? `<div class="text_muted fontsize90p marginBot10">${escapeHtml(t.description)}</div>` : ''}
-                <div class="flex-container flexWrap flexGap5">
-                    ${Object.keys(t.prompts).map(identifier =>
-                        `<span class="fontsize80p padding5 toggleEnabled" style="border-radius: 12px;">${escapeHtml(identifier)}</span>`
-                    ).join('')}
                 </div>
             </div>
         `;
@@ -194,42 +183,99 @@ function setupTemplateManagerEvents() {
  * Show create template dialog
  */
 async function showCreateTemplateDialog() {
+    // Get available prompts from ST's Prompt Manager
+    const availablePrompts = window.oai_settings?.prompts || [];
+    const promptList = availablePrompts.filter(p => p.identifier);
+
+    if (promptList.length === 0) {
+        toastr.warning('No prompts available to create template from');
+        return;
+    }
+
     const content = document.createElement('div');
     content.innerHTML = `
         <div class="flex-container flexFlowColumn flexGap10">
-            <label for="stgl-template-name">Template Name:</label>
-            <input type="text" id="stgl-template-name" class="text_pole" placeholder="My Custom Template">
-
-            <label for="stgl-template-desc">Description (optional):</label>
-            <textarea id="stgl-template-desc" class="text_pole" rows="3" placeholder="Description of this template..."></textarea>
-
-            <p class="text_muted">This will capture all current prompts from the Prompt Manager.</p>
+            <div class="flex-container flexFlowColumn">
+                <label for="stgl-template-name"><strong>Template Name:</strong></label>
+                <input type="text" id="stgl-template-name" class="text_pole" placeholder="Enter template name" required>
+            </div>
+            <div class="flex-container flexFlowColumn">
+                <label for="stgl-template-desc"><strong>Description (optional):</strong></label>
+                <textarea id="stgl-template-desc" class="text_pole" placeholder="Describe this template" style="min-height: 80px; resize: vertical;"></textarea>
+            </div>
+            <div class="flex-container flexFlowColumn">
+                <label><strong>Include Prompts:</strong></label>
+                <div class="flex-container flexGap5 m-b-1">
+                    <button type="button" id="stgl-select-all" class="menu_button menu_button_icon interactable">Select All</button>
+                    <button type="button" id="stgl-unselect-all" class="menu_button menu_button_icon interactable">Unselect All</button>
+                </div>
+                <div class="flex-container flexWrap flexGap10 m-t-1">
+                    ${promptList.map(p => `
+                        <div class="flex-container alignItemsCenter flexGap5">
+                            <input type="checkbox" name="stgl-prompts" value="${escapeHtml(p.identifier)}" checked class="interactable">
+                            <label>${escapeHtml(p.name)}</label>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
         </div>
     `;
 
+    let capturedData = null;
+
     const popup = new Popup(content, POPUP_TYPE.CONFIRM, '', {
         okButton: 'Create',
-        cancelButton: 'Cancel'
+        cancelButton: 'Cancel',
+        allowVerticalScrolling: true,
+        onOpen: () => {
+            // Setup select/unselect all buttons
+            document.getElementById('stgl-select-all')?.addEventListener('click', () => {
+                document.querySelectorAll('input[name="stgl-prompts"]').forEach(cb => cb.checked = true);
+            });
+            document.getElementById('stgl-unselect-all')?.addEventListener('click', () => {
+                document.querySelectorAll('input[name="stgl-prompts"]').forEach(cb => cb.checked = false);
+            });
+        },
+        onClosing: (popup) => {
+            // Capture values before popup closes and DOM is removed
+            if (popup.result === POPUP_RESULT.AFFIRMATIVE) {
+                const name = document.getElementById('stgl-template-name')?.value.trim();
+                const description = document.getElementById('stgl-template-desc')?.value.trim();
+                const selectedPrompts = Array.from(document.querySelectorAll('input[name="stgl-prompts"]:checked'))
+                    .map(cb => cb.value);
+
+                if (!name) {
+                    toastr.error('Template name is required');
+                    return false; // Prevent popup from closing
+                }
+
+                if (selectedPrompts.length === 0) {
+                    toastr.error('Select at least one prompt');
+                    return false; // Prevent popup from closing
+                }
+
+                capturedData = { name, description, selectedPrompts };
+            }
+            return true; // Allow popup to close
+        }
     });
 
     const result = await popup.show();
 
-    if (result === POPUP_RESULT.AFFIRMATIVE) {
-        const name = document.getElementById('stgl-template-name').value.trim();
-        const description = document.getElementById('stgl-template-desc').value.trim();
+    if (!result || !capturedData) {
+        return;
+    }
 
-        if (!name) {
-            toastr.warning('Template name is required');
-            return;
-        }
-
-        try {
-            const template = window.promptTemplateManager.createFromCurrent(name, description);
-            toastr.success('Template created successfully');
-            await renderTemplateList();
-        } catch (error) {
-            toastr.error('Failed to create template: ' + error.message);
-        }
+    try {
+        const template = window.promptTemplateManager.createFromCurrent(
+            capturedData.name,
+            capturedData.description,
+            capturedData.selectedPrompts
+        );
+        toastr.success('Template created successfully');
+        await renderTemplateList();
+    } catch (error) {
+        toastr.error('Failed to create template: ' + error.message);
     }
 }
 
@@ -277,7 +323,12 @@ window.stglEditTemplate = async function(id) {
         });
 
         toastr.success('Template updated');
-        await renderTemplateList();
+
+        // Close and reopen the main popup to force a complete refresh
+        if (mainPopup) {
+            await mainPopup.completeCancelled();
+        }
+        setTimeout(openPromptTemplateManager, 100);
     }
 };
 
@@ -361,15 +412,7 @@ window.stglViewPrompts = async function(templateId) {
             </div>
             ${template.description ? `<div class="text_muted">${escapeHtml(template.description)}</div>` : ''}
 
-            <ul id="stgl-prompt-order-list" class="text_pole" style="list-style: none; padding: 0; margin: 0; max-height: 60vh; overflow-y: auto;">
-                <li class="completion_prompt_manager_list_head">
-                    <span>Name</span>
-                    <span></span>
-                    <span>Role</span>
-                </li>
-                <li style="grid-column: 1 / -1; margin: 0.5em 0;">
-                    <hr style="width: 100%; background: var(--SmartThemeBorderColor);">
-                </li>
+            <ul id="stgl-prompt-order-list" class="text_pole ui-sortable">
                 ${orderedPrompts.map(prompt => {
                     const isMarker = prompt.marker;
                     const isSystemPrompt = prompt.system_prompt;
@@ -391,7 +434,7 @@ window.stglViewPrompts = async function(templateId) {
                         : '';
 
                     return `
-                        <li class="completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable ${isMarker ? 'ccpm_prompt_manager_marker' : ''}" data-identifier="${escapeHtml(prompt.identifier)}">
+                        <li class="ui-sortable-handle completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable ${isMarker ? 'stgl_prompt_manager_marker' : ''}" data-identifier="${escapeHtml(prompt.identifier)}">
                             <span class="drag-handle">☰</span>
                             <span class="completion_prompt_manager_prompt_name">
                                 ${isMarker ? '<span class="fa-fw fa-solid fa-thumb-tack" title="Marker"></span>' : ''}
@@ -403,11 +446,9 @@ window.stglViewPrompts = async function(templateId) {
                                 ${roleIcon ? `<span data-role="${escapeHtml(prompt.role)}" class="fa-xs fa-solid ${roleIcon}" title="${roleTitle}"></span>` : ''}
                                 ${isInjectionPrompt ? `<small class="prompt-manager-injection-depth">@ ${escapeHtml(prompt.injection_depth)}</small>` : ''}
                             </span>
-                            <span></span>
-                            <span class="stgl_prompt_role">${escapeHtml(prompt.role || 'system')}</span>
                         </li>
                         ${!isMarker ? `
-                            <li class="inline-drawer stgl_prompt_drawer" data-identifier="${escapeHtml(prompt.identifier)}" style="grid-column: 1 / -1; margin: 0 0 10px 30px;">
+                            <li class="inline-drawer stgl_prompt_drawer" data-identifier="${escapeHtml(prompt.identifier)}">
                                 <div class="inline-drawer-content text_pole padding10" style="background: var(--black30a); display: none;">
                                     ${prompt.injection_position === 1 ? `
                                         <div class="flex-container flexGap10 marginBot5 fontsize90p text_muted">
@@ -416,9 +457,13 @@ window.stglViewPrompts = async function(templateId) {
                                             <span><strong>Order:</strong> ${prompt.injection_order || 100}</span>
                                         </div>
                                     ` : ''}
-                                    <div class="fontsize90p" style="white-space: pre-wrap; font-family: monospace; max-height: 300px; overflow-y: auto;">
+                                    <div class="code">
 ${escapeHtml(prompt.content || '(empty)')}
                                     </div>
+                                </div>
+                            </li>
+                            <li class="inline-drawer stgl_prompt_edit_drawer" id="stgl-edit-drawer-${escapeHtml(prompt.identifier)}" style="display: none;">
+                                <div class="inline-drawer-content">
                                 </div>
                             </li>
                         ` : ''}
@@ -458,7 +503,7 @@ ${escapeHtml(prompt.content || '(empty)')}
                     e.preventDefault();
                     e.stopPropagation();
                     const identifier = btn.dataset.identifier;
-                    window.stglEditPromptInTemplate(templateId, identifier);
+                    stglOpenEditDrawer(templateId, identifier);
                 });
             });
 
@@ -501,126 +546,130 @@ ${escapeHtml(prompt.content || '(empty)')}
 };
 
 /**
- * Edit a prompt within a template using ST's existing edit form
+ * Manages the inline edit drawer for a prompt in a template.
+ * This uses a drawer UI pattern like SillyTavern's base prompt manager.
  */
-window.stglEditPromptInTemplate = async function(templateId, promptIdentifier) {
+async function stglOpenEditDrawer(templateId, promptIdentifier) {
     const template = window.promptTemplateManager.getTemplate(templateId);
-    if (!template) {
-        toastr.error('Template not found');
-        return;
-    }
+    const prompt = template?.prompts[promptIdentifier];
 
-    const prompt = template.prompts[promptIdentifier];
     if (!prompt) {
-        toastr.error('Prompt not found in template');
+        toastr.error('Prompt not found in template.');
         return;
     }
 
-    // Clone ST's existing edit form from the DOM
-    const formContainer = document.getElementById('completion_prompt_manager_popup_edit');
-    if (!formContainer) {
-        toastr.error('Edit form container not found');
+    // Find the master edit form and the target drawer
+    const masterForm = document.getElementById('completion_prompt_manager_popup_edit');
+    const drawer = document.getElementById(`stgl-edit-drawer-${promptIdentifier}`);
+    const drawerContent = drawer?.querySelector('.inline-drawer-content');
+
+    console.log('Debug stglOpenEditDrawer:', { masterForm, drawer, drawerContent, promptIdentifier });
+
+    if (!masterForm || !drawer || !drawerContent) {
+        toastr.error(`UI components for editing are missing. masterForm: ${!!masterForm}, drawer: ${!!drawer}, drawerContent: ${!!drawerContent}`);
         return;
     }
 
-    // Clone ST's form to use in our popup
-    const clonedForm = formContainer.cloneNode(true);
-    clonedForm.id = 'stgl_temp_edit_form';
-    clonedForm.style.display = 'block';
-
-    let savedData = null;
-
-    const editPopup = new Popup(clonedForm, POPUP_TYPE.CONFIRM, '', {
-        okButton: 'Save',
-        cancelButton: 'Cancel',
-        wide: true,
-        large: true,
-        allowVerticalScrolling: true,
-        onOpen: () => {
-            // Re-populate after clone (DOM elements are new)
-            const clonedNameField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_name');
-            const clonedRoleField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_role');
-            const clonedPromptField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt');
-            const clonedInjectionPositionField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
-            const clonedInjectionDepthField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
-            const clonedInjectionOrderField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
-            const clonedInjectionTriggerField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
-            const clonedDepthBlock = clonedForm.querySelector('#completion_prompt_manager_depth_block');
-            const clonedOrderBlock = clonedForm.querySelector('#completion_prompt_manager_order_block');
-            const clonedForbidOverridesField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
-
-            if (clonedNameField) clonedNameField.value = prompt.name || '';
-            if (clonedRoleField) clonedRoleField.value = prompt.role || 'system';
-            if (clonedPromptField) clonedPromptField.value = prompt.content || '';
-            if (clonedInjectionPositionField) clonedInjectionPositionField.value = (prompt.injection_position ?? 0).toString();
-            if (clonedInjectionDepthField) clonedInjectionDepthField.value = (prompt.injection_depth ?? 4).toString();
-            if (clonedInjectionOrderField) clonedInjectionOrderField.value = (prompt.injection_order ?? 100).toString();
-
-            if (clonedInjectionTriggerField) {
-                Array.from(clonedInjectionTriggerField.options).forEach(option => {
-                    option.selected = Array.isArray(prompt.injection_trigger) && prompt.injection_trigger.includes(option.value);
-                });
-            }
-
-            if (clonedDepthBlock && clonedOrderBlock) {
-                const showFields = clonedInjectionPositionField && clonedInjectionPositionField.value === '1';
-                clonedDepthBlock.style.visibility = showFields ? 'visible' : 'hidden';
-                clonedOrderBlock.style.visibility = showFields ? 'visible' : 'hidden';
-
-                // Add change listener for injection position
-                if (clonedInjectionPositionField) {
-                    clonedInjectionPositionField.addEventListener('change', (e) => {
-                        const showFields = e.target.value === '1';
-                        clonedDepthBlock.style.visibility = showFields ? 'visible' : 'hidden';
-                        clonedOrderBlock.style.visibility = showFields ? 'visible' : 'hidden';
-                    });
-                }
-            }
-
-            if (clonedForbidOverridesField) clonedForbidOverridesField.checked = prompt.forbid_overrides ?? false;
-        },
-        onClosing: (popup) => {
-            if (popup.result === POPUP_RESULT.AFFIRMATIVE) {
-                // Capture form values
-                const clonedNameField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_name');
-                const clonedRoleField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_role');
-                const clonedPromptField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt');
-                const clonedInjectionPositionField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
-                const clonedInjectionDepthField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
-                const clonedInjectionOrderField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
-                const clonedInjectionTriggerField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
-                const clonedForbidOverridesField = clonedForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
-
-                savedData = {
-                    name: clonedNameField?.value || prompt.name,
-                    role: clonedRoleField?.value || prompt.role,
-                    content: clonedPromptField?.value || prompt.content,
-                    injection_position: clonedInjectionPositionField ? Number(clonedInjectionPositionField.value) : prompt.injection_position,
-                    injection_depth: clonedInjectionDepthField ? Number(clonedInjectionDepthField.value) : prompt.injection_depth,
-                    injection_order: clonedInjectionOrderField ? Number(clonedInjectionOrderField.value) : prompt.injection_order,
-                    injection_trigger: clonedInjectionTriggerField ? Array.from(clonedInjectionTriggerField.selectedOptions).map(opt => opt.value) : prompt.injection_trigger,
-                    forbid_overrides: clonedForbidOverridesField?.checked ?? prompt.forbid_overrides,
-                };
-            }
-            return true;
+    // If another drawer is open, close it first
+    const currentlyOpenDrawer = document.querySelector('.stgl_prompt_edit_drawer[style*="display: block"]');
+    if (currentlyOpenDrawer && currentlyOpenDrawer !== drawer) {
+        const currentlyEditingForm = currentlyOpenDrawer.querySelector('#completion_prompt_manager_popup_edit');
+        if (currentlyEditingForm) {
+            // Move the form back to its original hidden container to reset state
+            document.body.appendChild(currentlyEditingForm);
+            currentlyEditingForm.style.display = 'none';
         }
-    });
+        currentlyOpenDrawer.style.display = 'none';
+    }
 
-    const result = await editPopup.show();
+    // --- Populate Form Fields ---
+    masterForm.querySelector('#completion_prompt_manager_popup_entry_form_name').value = prompt.name || '';
+    masterForm.querySelector('#completion_prompt_manager_popup_entry_form_role').value = prompt.role || 'system';
+    masterForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt').value = prompt.content || '';
 
-    if (result && savedData) {
+    const injectionPositionField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
+    const injectionDepthField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
+    const injectionOrderField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
+    const injectionTriggerField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
+    const depthBlock = masterForm.querySelector('#completion_prompt_manager_depth_block');
+    const orderBlock = masterForm.querySelector('#completion_prompt_manager_order_block');
+    const forbidOverridesField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
+
+    if (injectionPositionField) injectionPositionField.value = (prompt.injection_position ?? 0).toString();
+    if (injectionDepthField) injectionDepthField.value = (prompt.injection_depth ?? 4).toString();
+    if (injectionOrderField) injectionOrderField.value = (prompt.injection_order ?? 100).toString();
+
+    if (injectionTriggerField) {
+        Array.from(injectionTriggerField.options).forEach(option => {
+            option.selected = Array.isArray(prompt.injection_trigger) && prompt.injection_trigger.includes(option.value);
+        });
+    }
+
+    if (depthBlock && orderBlock && injectionPositionField) {
+        const showFields = injectionPositionField.value === '1';
+        depthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+        orderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+
+        // Add change listener for injection position
+        injectionPositionField.addEventListener('change', (e) => {
+            const showFields = e.target.value === '1';
+            depthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+            orderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+        });
+    }
+
+    if (forbidOverridesField) forbidOverridesField.checked = prompt.forbid_overrides ?? false;
+
+    // --- Add Save/Cancel Buttons directly to the drawer ---
+    drawerContent.innerHTML = '';
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'popup-controls';
+    buttonContainer.innerHTML = `
+        <button id="stgl-drawer-save-btn" class="menu_button">Save</button>
+        <button id="stgl-drawer-cancel-btn" class="menu_button">Cancel</button>
+    `;
+
+    // --- Move the form into the drawer and make it visible ---
+    drawerContent.appendChild(masterForm);
+    drawerContent.appendChild(buttonContainer);
+    masterForm.style.display = 'block';
+    drawer.style.display = 'block';
+
+    // --- Handle Cleanup and Saving ---
+    const closeDrawer = () => {
+        // Move the form back to the body and hide it, ready for the next use
+        document.body.appendChild(masterForm);
+        masterForm.style.display = 'none';
+        drawer.style.display = 'none';
+        drawerContent.innerHTML = '';
+    };
+
+    document.getElementById('stgl-drawer-cancel-btn').addEventListener('click', closeDrawer);
+
+    document.getElementById('stgl-drawer-save-btn').addEventListener('click', () => {
+        // Capture form data
+        const savedData = {
+            name: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_name').value,
+            role: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_role').value,
+            content: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt').value,
+            injection_position: injectionPositionField ? Number(injectionPositionField.value) : prompt.injection_position,
+            injection_depth: injectionDepthField ? Number(injectionDepthField.value) : prompt.injection_depth,
+            injection_order: injectionOrderField ? Number(injectionOrderField.value) : prompt.injection_order,
+            injection_trigger: injectionTriggerField ? Array.from(injectionTriggerField.selectedOptions).map(opt => opt.value) : prompt.injection_trigger,
+            forbid_overrides: forbidOverridesField?.checked ?? prompt.forbid_overrides,
+        };
+
         // Update the prompt in the template
         Object.assign(template.prompts[promptIdentifier], savedData);
-
-        // Save template using the central API
         window.promptTemplateManager.saveTemplate(template);
-
         toastr.success('Prompt updated in template');
 
-        // Refresh the viewer
-        await window.stglViewPrompts(templateId);
-    }
-};
+        closeDrawer();
+
+        // Refresh the entire prompt list view to show changes
+        window.stglViewPrompts(templateId);
+    });
+}
 
 /**
  * Lock template to character/model/chat
