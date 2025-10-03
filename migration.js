@@ -169,14 +169,17 @@ export class CCPMMigration {
                 report.templates = Object.keys(ccpmData.templates).length;
             }
 
-            // Migrate template locks to STGL locks
+            // Migrate template locks to STGL locks (merge with existing STCL locks)
             if (ccpmData.templateLocks) {
                 // Character locks
                 if (ccpmData.templateLocks.character) {
                     for (const [chId, templateId] of Object.entries(ccpmData.templateLocks.character)) {
                         try {
-                            const stglLock = this._convertCCPMToSTGL(templateId);
-                            stglStorage.setCharacterLock(chId, stglLock);
+                            const existingLock = stglStorage.getCharacterLock(chId);
+                            const mergedLock = existingLock
+                                ? { ...existingLock, template: templateId }  // Merge: keep profile+preset from STCL, add template from CCPM
+                                : this._convertCCPMToSTGL(templateId);       // No STCL data, use CCPM only
+                            stglStorage.setCharacterLock(chId, mergedLock);
                             report.characterLocks++;
                         } catch (error) {
                             report.errors.push(`Character ${chId}: ${error.message}`);
@@ -188,8 +191,11 @@ export class CCPMMigration {
                 if (ccpmData.templateLocks.model) {
                     for (const [modelName, templateId] of Object.entries(ccpmData.templateLocks.model)) {
                         try {
-                            const stglLock = this._convertCCPMToSTGL(templateId);
-                            stglStorage.setModelLock(modelName, stglLock);
+                            const existingLock = stglStorage.getModelLock(modelName);
+                            const mergedLock = existingLock
+                                ? { ...existingLock, template: templateId }  // Merge template into existing
+                                : this._convertCCPMToSTGL(templateId);       // No existing, use CCPM only
+                            stglStorage.setModelLock(modelName, mergedLock);
                             report.modelLocks++;
                         } catch (error) {
                             report.errors.push(`Model ${modelName}: ${error.message}`);
@@ -203,8 +209,11 @@ export class CCPMMigration {
                     for (const group of groups) {
                         if (group.ccpm_template_lock) {
                             try {
-                                const stglLock = this._convertCCPMToSTGL(group.ccpm_template_lock);
-                                stglStorage.setGroupLock(group.id, stglLock);
+                                const existingLock = stglStorage.getGroupLock(group.id);
+                                const mergedLock = existingLock
+                                    ? { ...existingLock, template: group.ccpm_template_lock }  // Merge
+                                    : this._convertCCPMToSTGL(group.ccpm_template_lock);        // CCPM only
+                                stglStorage.setGroupLock(group.id, mergedLock);
                                 report.groupLocks++;
                             } catch (error) {
                                 report.errors.push(`Group ${group.id}: ${error.message}`);
@@ -214,11 +223,14 @@ export class CCPMMigration {
                 }
             }
 
-            // Migrate chat lock from chat_metadata
+            // Migrate chat lock from chat_metadata (merge with existing STCL chat lock)
             if (chat_metadata?.ccpm_template_lock) {
                 try {
-                    const stglLock = this._convertCCPMToSTGL(chat_metadata.ccpm_template_lock);
-                    stglStorage.setChatLock(stglLock);
+                    const existingLock = stglStorage.getChatLock();
+                    const mergedLock = existingLock
+                        ? { ...existingLock, template: chat_metadata.ccpm_template_lock }  // Merge
+                        : this._convertCCPMToSTGL(chat_metadata.ccpm_template_lock);        // CCPM only
+                    stglStorage.setChatLock(mergedLock);
                     report.chatLocks++;
                 } catch (error) {
                     report.errors.push(`Chat: ${error.message}`);
@@ -311,14 +323,14 @@ export class MigrationManager {
             timestamp: new Date().toISOString()
         };
 
-        // Migrate STCL
+        // Migrate STCL first (provides profile + preset)
         if (STCLMigration.hasSTCLData()) {
             console.log('STGL: Found STCL data, migrating...');
             report.stcl.data = STCLMigration.migrate(stglStorage);
             report.stcl.migrated = true;
         }
 
-        // Migrate CCPM
+        // Migrate CCPM second (provides templates, automatically merges with existing STCL locks)
         if (CCPMMigration.hasCCPMData()) {
             console.log('STGL: Found CCPM data, migrating...');
             report.ccpm.data = CCPMMigration.migrate(stglStorage);
@@ -332,6 +344,7 @@ export class MigrationManager {
 
         return report;
     }
+
 
     /**
      * Check if migration has been run

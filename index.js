@@ -2119,24 +2119,19 @@ async function init() {
                 const settings = storage.getExtensionSettings();
                 if (!settings.templates) settings.templates = {};
                 settings.templates[template.id] = template;
-                storage._saveSettings();
+                storage.saveExtensionSettings();
                 return template;
             },
-            applyTemplate(templateId) {
-                const template = this.getTemplate(templateId);
-                if (!template) return false;
-                const result = TemplateOps.applyToPromptManager(template);
-                // Track the applied template so getCurrentTemplate() works
-                if (result) {
-                    templateLocker.currentTemplate = templateId;
-                }
-                return result;
+            async applyTemplate(templateId) {
+                // Use TemplateLocker for race condition protection
+                const currentContext = new ChatContext().getCurrent();
+                return await templateLocker.applyTemplate(templateId, currentContext.primaryId);
             },
             deleteTemplate(id) {
                 const settings = storage.getExtensionSettings();
                 if (settings.templates?.[id]) {
                     delete settings.templates[id];
-                    storage._saveSettings();
+                    storage.saveExtensionSettings();
                     return true;
                 }
                 return false;
