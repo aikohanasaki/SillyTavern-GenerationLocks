@@ -1,89 +1,81 @@
-/* CCPromptManager - Minimal styles that can't be inherited from ST */
+/* SillyTavern Generation Locks (STGL) Styles */
 
-/* Apply ST's prompt manager grid layout to our viewer */
-#ccpm-prompt-order-list {
-    display: flex;
-    flex-direction: column;
-    min-height: 300px;
+/* Status indicator in extensions menu */
+.stgl-status-indicator {
+    padding: 8px 12px;
+    margin: 5px 0;
+    background: var(--black30a);
+    border-radius: 5px;
+    font-size: 0.9em;
 }
 
-#ccpm-prompt-order-list li {
-    display: grid;
-    grid-template-columns: 4fr 80px 45px;
-    margin-bottom: 0.5em;
-    width: 100%;
+.stgl-status-indicator i {
+    margin-right: 4px;
 }
 
-#ccpm-prompt-order-list li.ccpm_prompt_manager_prompt {
-    align-items: center;
-    padding: 0.5em;
-    border: 1px solid var(--SmartThemeBorderColor);
-}
-
-/* Drag handle positioning (copied from ST's promptmanager.css) */
-#ccpm-prompt-order-list .ccpm_prompt_manager_prompt .drag-handle:not(.ui-sortable-handle) {
-    display: none;
-}
-
-#ccpm-prompt-order-list .ccpm_prompt_manager_prompt:has(.drag-handle.ui-sortable-handle) {
-    position: relative;
-    padding-left: 20px;
-}
-
-#ccpm-prompt-order-list .ccpm_prompt_manager_prompt .drag-handle {
-    position: absolute;
-    height: 100%;
-    top: 0;
-    padding: 0 5px;
-    display: flex;
-    align-items: center;
-}
-
-/* CCPM-specific elements not in ST */
-.ccpm-expand-prompt {
-    color: var(--SmartThemeBodyColor);
+/* Lock management popup */
+#stgl-menu-item-container {
     cursor: pointer;
 }
 
-.ccpm-expand-prompt:hover {
-    text-decoration: underline;
-}
-
-.ccpm-edit-prompt:hover {
-    opacity: 1 !important;
-}
-
-.ccpm_prompt_drawer {
-    list-style: none;
-    padding: 0;
-}
-
-.ccpm_prompt_manager_marker {
-    opacity: 0.7;
-}
-
-.ccpm_prompt_manager_marker .ccpm_prompt_manager_prompt_name span:not(.fa-solid):not(.fa-thumb-tack) {
-    font-style: italic;
-    cursor: default;
-}
-
-/* CCPM template indicator in ST's prompt manager */
-.ccpm-template-indicator {
-    padding: 8px 10px;
-    margin-bottom: 10px;
-    text-align: center;
-    font-size: 0.9em;
+#stgl-menu-item:hover {
     background: var(--SmartThemeBlurTintColor);
-    border-radius: 5px;
+}
+
+/* Popup content spacing */
+.completion_prompt_manager_popup_entry {
+    padding: 10px;
+}
+
+.completion_prompt_manager_popup_entry_form_control {
+    margin-bottom: 15px;
+}
+
+/* Lock display boxes */
+.text_pole {
+    background: var(--black30a);
     border: 1px solid var(--SmartThemeBorderColor);
-    width: 100%;
-    box-sizing: border-box;
+    border-radius: 5px;
 }
 
-.ccpm-template-indicator .fa-solid {
-    margin-right: 5px;
+.text_pole.padding10 {
+    padding: 10px;
 }
 
-.ccpm-template-indicator div {
-    line-height: 1.6;
+/* Flex utilities for lock display */
+.flex-container.flexFlowColumn.flexGap10 > * {
+    margin-bottom: 10px;
+}
+
+.flex-container.flexFlowColumn.flexGap10 > *:last-child {
+    margin-bottom: 0;
+}
+
+/* Standout headers */
+.standoutHeader {
+    margin-top: 10px;
+    margin-bottom: 5px;
+    color: var(--SmartThemeBodyColor);
+}
+
+/* Radio and checkbox labels */
+.radio_label,
+.checkbox_label {
+    display: block;
+    margin: 5px 0;
+    cursor: pointer;
+}
+
+.radio_label input,
+.checkbox_label input {
+    margin-right: 8px;
+}
+
+/* Status text colors */
+.text_muted {
+    color: var(--grey70);
+}
+
+.text_danger {
+    color: var(--SmartThemeQuoteColor);
 }

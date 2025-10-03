@@ -1,19 +1,12 @@
 {
-  "display_name": "Generation Locks",
-  "loading_order": 50,
-  "requires": [],
-  "optional": [],
-  "js": "index.js",
-  "css": "style.css",
-  "author": "aikohanasaki",
-  "version": "1.0.0",
-  "homePage": "https://github.com/aikohanasaki/SillyTavern-GenerationLocks",
-  "description": "Unified preset creation and locks. Create, save, and lock prompt configurations per character, chat, or group. Features template library, hierarchical locking, auto-apply on preset/character changes, and full prompt editing.",
-  "license": "AGPL-3.0",
-  "auto_update": {
-    "source": "github",
-    "whitelist": [
-      "https://github.com/aikohanasaki/SillyTavern-CCPromptManager"
-    ]
-  }
+    "display_name": "Generation Locks",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Aikobots",
+    "version": "1.0.0",
+    "homePage": "https://github.com/Aikobots/SillyTavern-GenerationLocks",
+    "description": "Advanced generation settings management with multi-dimensional locking for profiles, presets, and templates. Combines connection profile management with completion template control."
 }
