@@ -12,6 +12,8 @@ import { selected_group, groups, editGroup } from '../../../group-chats.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { executeSlashCommandsWithOptions } from '../../../slash-commands.js';
 import { oai_settings, promptManager } from '../../../openai.js';
+import { MigrationManager } from './migration.js';
+import { injectPromptTemplateManagerButton } from './promptManager.js';
 
 // ===== CONSTANTS AND CONFIGURATION =====
 
@@ -202,8 +204,8 @@ class ChatContext {
 
     _getCurrentModel() {
         try {
-            // Get current model from oai_settings or connection manager
-            return oai_settings?.model || extension_settings?.connectionManager?.selectedModel || null;
+            // Read from oai_settings which is updated by /model command
+            return oai_settings?.model || null;
         } catch (error) {
             if (DEBUG_MODE) console.warn('STGL: Error getting current model:', error);
             return null;
@@ -868,11 +870,12 @@ class ProfileLocker {
      */
     getCurrentProfile() {
         try {
-            const context = getContext();
-            if (!context?.connectionProfile) {
-                return null;
-            }
-            return context.connectionProfile;
+            // Read from connection manager extension settings
+            const selectedProfileId = extension_settings?.connectionManager?.selectedProfile;
+            if (!selectedProfileId) return null;
+
+            const profile = extension_settings?.connectionManager?.profiles?.find(p => p.id === selectedProfileId);
+            return profile?.name || null;
         } catch (error) {
             console.error('STGL: Error getting current profile:', error);
             return null;
@@ -948,12 +951,8 @@ class PresetLocker {
      */
     getCurrentPreset() {
         try {
-            const presetManager = getPresetManager();
-            if (!presetManager) {
-                console.warn('STGL: PresetManager not available');
-                return null;
-            }
-            return presetManager.getSelectedPresetName();
+            // Read from oai_settings which is updated by /preset command
+            return oai_settings?.preset_settings_openai || null;
         } catch (error) {
             console.error('STGL: Error getting current preset:', error);
             return null;
@@ -1688,7 +1687,7 @@ async function getPopupContent() {
         { id: 'stgl-enable-character', label: 'Remember per group', checked: preferences.enableGroupMemory },
         { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
         { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
-        { id: 'stgl-prefer-chat-over-group', label: 'Prefer chat over group', checked: preferences.preferChatOverCharacterOrGroup },
+        { id: 'stgl-prefer-chat-over-character-group', label: 'Prefer chat over character/group', checked: preferences.preferChatOverCharacterOrGroup },
         { id: 'stgl-prefer-chat-over-model', label: 'Prefer chat over model', checked: preferences.preferChatOverModel },
         { id: 'stgl-prefer-individual', label: 'Prefer individual character in group', checked: preferences.preferIndividualCharacterInGroup },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
@@ -1696,7 +1695,7 @@ async function getPopupContent() {
         { id: 'stgl-enable-character', label: 'Remember per character', checked: preferences.enableCharacterMemory },
         { id: 'stgl-enable-chat', label: 'Remember per chat', checked: preferences.enableChatMemory },
         { id: 'stgl-enable-model', label: 'Remember per model', checked: preferences.enableModelMemory || true },
-        { id: 'stgl-prefer-chat-over-character', label: 'Prefer chat over character', checked: preferences.preferChatOverCharacterOrGroup },
+        { id: 'stgl-prefer-chat-over-character-group', label: 'Prefer chat over character/group', checked: preferences.preferChatOverCharacterOrGroup },
         { id: 'stgl-prefer-chat-over-model', label: 'Prefer chat over model', checked: preferences.preferChatOverModel },
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ];
@@ -1981,8 +1980,7 @@ async function handlePopupClose(popup) {
             'stgl-enable-character': 'enableCharacterMemory',
             'stgl-enable-chat': 'enableChatMemory',
             'stgl-enable-model': 'enableModelMemory',
-            'stgl-prefer-chat-over-character': 'preferChatOverCharacterOrGroup',
-            'stgl-prefer-chat-over-group': 'preferChatOverCharacterOrGroup',
+            'stgl-prefer-chat-over-character-group': 'preferChatOverCharacterOrGroup',
             'stgl-prefer-chat-over-model': 'preferChatOverModel',
             'stgl-prefer-individual': 'preferIndividualCharacterInGroup',
             'stgl-show-notifications': 'showNotifications'
@@ -2061,6 +2059,56 @@ async function init() {
 
         if (DEBUG_MODE) console.log('STGL: Settings loaded:', settings);
 
+        // Run migration from STCL/CCPM if needed
+        if (!MigrationManager.hasMigrated(storage)) {
+            console.log('STGL: Running migration from STCL/CCPM...');
+            const migrationReport = await MigrationManager.migrateAll(storage);
+
+            if (migrationReport.stcl.migrated || migrationReport.ccpm.migrated) {
+                console.log('STGL: Migration complete:', migrationReport);
+
+                // Show migration summary to user
+                let message = '<h3>Migration Complete</h3>';
+
+                if (migrationReport.stcl.migrated) {
+                    const stclData = migrationReport.stcl.data;
+                    message += `<p><strong>Character Locks (STCL):</strong></p>`;
+                    message += `<ul>`;
+                    message += `<li>Character locks: ${stclData.characterLocks}</li>`;
+                    message += `<li>Chat locks: ${stclData.chatLocks}</li>`;
+                    message += `<li>Group locks: ${stclData.groupLocks}</li>`;
+                    if (stclData.errors.length > 0) {
+                        message += `<li>Errors: ${stclData.errors.length}</li>`;
+                    }
+                    message += `</ul>`;
+                }
+
+                if (migrationReport.ccpm.migrated) {
+                    const ccpmData = migrationReport.ccpm.data;
+                    message += `<p><strong>CC Prompt Manager (CCPM):</strong></p>`;
+                    message += `<ul>`;
+                    message += `<li>Templates: ${ccpmData.templates}</li>`;
+                    message += `<li>Character locks: ${ccpmData.characterLocks}</li>`;
+                    message += `<li>Model locks: ${ccpmData.modelLocks}</li>`;
+                    message += `<li>Chat locks: ${ccpmData.chatLocks}</li>`;
+                    message += `<li>Group locks: ${ccpmData.groupLocks}</li>`;
+                    if (ccpmData.errors.length > 0) {
+                        message += `<li>Errors: ${ccpmData.errors.length}</li>`;
+                    }
+                    message += `</ul>`;
+                }
+
+                message += `<p>Your settings have been migrated to Generation Locks!</p>`;
+
+                toastr.success('Migration from STCL/CCPM complete!');
+
+                // Optionally show detailed popup
+                if (DEBUG_MODE) {
+                    await callGenericPopup(message, POPUP_TYPE.TEXT, '', { okButton: 'OK' });
+                }
+            }
+        }
+
         // Initialize core components
         const chatContext = new ChatContext();
         const priorityResolver = new PriorityResolver(storage);
@@ -2083,6 +2131,7 @@ async function init() {
 
         // Inject UI
         injectMenuButton();
+        injectPromptTemplateManagerButton();
 
         // Expose template manager globally (like CCPM)
         window.promptTemplateManager = {
