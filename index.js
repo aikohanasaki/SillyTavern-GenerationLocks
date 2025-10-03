@@ -7,7 +7,7 @@
 import { eventSource, event_types, saveSettingsDebounced, chat_metadata, name2, systemUserName, neutralCharacterName, characters } from '../../../../script.js';
 import { extension_settings, saveMetadataDebounced, getContext } from '../../../extensions.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popup.js';
-import { lodash, moment, Handlebars, DOMPurify, morphdom } from '../../../../lib.js';
+import { lodash, Handlebars } from '../../../../lib.js';
 import { selected_group, groups, editGroup } from '../../../group-chats.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { executeSlashCommandsWithOptions } from '../../../slash-commands.js';
@@ -343,33 +343,6 @@ class StorageAdapter {
         return false;
     }
 
-    // ===== PROFILE LOCKS =====
-
-    getProfileLock(profileName) {
-        if (!profileName) return null;
-        const settings = this.getExtensionSettings();
-        return settings.profileLocks?.[profileName] || null;
-    }
-
-    setProfileLock(profileName, locks) {
-        if (!profileName) return false;
-        const settings = this.getExtensionSettings();
-        if (!settings.profileLocks) settings.profileLocks = {};
-        settings.profileLocks[profileName] = locks;
-        this.saveExtensionSettings();
-        return true;
-    }
-
-    clearProfileLock(profileName) {
-        if (!profileName) return false;
-        const settings = this.getExtensionSettings();
-        if (settings.profileLocks?.[profileName]) {
-            delete settings.profileLocks[profileName];
-            this.saveExtensionSettings();
-            return true;
-        }
-        return false;
-    }
 
     // ===== CHAT LOCKS =====
 
