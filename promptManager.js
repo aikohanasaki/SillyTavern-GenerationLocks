@@ -5,8 +5,6 @@
  */
 
 import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popup.js';
-import { extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
 
 let mainPopup = null;
 
@@ -119,19 +117,19 @@ async function renderTemplateList() {
                         </div>
                     </div>
                     <div class="flex-container flexGap2">
-                        <div class="menu_button menu_button_icon interactable" onclick="window.stglApplyTemplate('${t.id}')" title="Apply Template" style="width: 32px; height: 32px; padding: 0;">
+                        <div class="menu_button menu_button_icon interactable stgl-apply-btn" data-template-id="${escapeHtml(t.id)}" title="Apply Template" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-play"></i>
                         </div>
-                        <div class="menu_button menu_button_icon interactable" onclick="window.stglViewPrompts('${t.id}')" title="View/Edit Prompts" style="width: 32px; height: 32px; padding: 0;">
+                        <div class="menu_button menu_button_icon interactable stgl-view-prompts-btn" data-template-id="${escapeHtml(t.id)}" title="View/Edit Prompts" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-pencil"></i>
                         </div>
-                        <div class="menu_button menu_button_icon interactable" onclick="window.stglLockTemplate('${t.id}')" title="Lock Template to Context" style="width: 32px; height: 32px; padding: 0;">
+                        <div class="menu_button menu_button_icon interactable stgl-lock-btn" data-template-id="${escapeHtml(t.id)}" title="Lock Template to Context" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-lock"></i>
                         </div>
-                        <div class="menu_button menu_button_icon interactable" onclick="window.stglEditTemplate('${t.id}')" title="Edit Template Name/Description" style="width: 32px; height: 32px; padding: 0;">
+                        <div class="menu_button menu_button_icon interactable stgl-edit-btn" data-template-id="${escapeHtml(t.id)}" title="Edit Template Name/Description" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-edit"></i>
                         </div>
-                        <div class="menu_button menu_button_icon interactable redOverlayGlow" onclick="window.stglDeleteTemplate('${t.id}')" title="Delete Template" style="width: 32px; height: 32px; padding: 0;">
+                        <div class="menu_button menu_button_icon interactable redOverlayGlow stgl-delete-btn" data-template-id="${escapeHtml(t.id)}" title="Delete Template" style="width: 32px; height: 32px; padding: 0;">
                             <i class="fa-solid fa-trash"></i>
                         </div>
                     </div>
@@ -139,12 +137,48 @@ async function renderTemplateList() {
                 ${t.description ? `<div class="text_muted fontsize90p marginBot10">${escapeHtml(t.description)}</div>` : ''}
                 <div class="flex-container flexWrap flexGap5">
                     ${Object.keys(t.prompts).map(identifier =>
-                        `<span class="fontsize80p padding5 toggleEnabled" style="border-radius: 12px;">${identifier}</span>`
+                        `<span class="fontsize80p padding5 toggleEnabled" style="border-radius: 12px;">${escapeHtml(identifier)}</span>`
                     ).join('')}
                 </div>
             </div>
         `;
     }).join('');
+
+    // Attach event listeners after rendering
+    document.querySelectorAll('.stgl-apply-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const templateId = button.dataset.templateId;
+            window.stglApplyTemplate(templateId);
+        });
+    });
+
+    document.querySelectorAll('.stgl-view-prompts-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const templateId = button.dataset.templateId;
+            window.stglViewPrompts(templateId);
+        });
+    });
+
+    document.querySelectorAll('.stgl-lock-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const templateId = button.dataset.templateId;
+            window.stglLockTemplate(templateId);
+        });
+    });
+
+    document.querySelectorAll('.stgl-edit-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const templateId = button.dataset.templateId;
+            window.stglEditTemplate(templateId);
+        });
+    });
+
+    document.querySelectorAll('.stgl-delete-btn').forEach(button => {
+        button.addEventListener('click', () => {
+            const templateId = button.dataset.templateId;
+            window.stglDeleteTemplate(templateId);
+        });
+    });
 }
 
 /**
@@ -236,15 +270,11 @@ window.stglEditTemplate = async function(id) {
             return;
         }
 
-        template.name = name;
-        template.description = description;
-        template.updatedAt = new Date().toISOString();
-
-        // Save via storage
-        const settings = extension_settings.STGL;
-        if (!settings.templates) settings.templates = {};
-        settings.templates[template.id] = template;
-        saveSettingsDebounced();
+        // Update template using the central API
+        window.promptTemplateManager.updateTemplate(template.id, {
+            name: name,
+            description: description
+        });
 
         toastr.success('Template updated');
         await renderTemplateList();
@@ -581,13 +611,9 @@ window.stglEditPromptInTemplate = async function(templateId, promptIdentifier) {
     if (result && savedData) {
         // Update the prompt in the template
         Object.assign(template.prompts[promptIdentifier], savedData);
-        template.updatedAt = new Date().toISOString();
 
-        // Save via storage
-        const settings = extension_settings.stgl;
-        if (!settings.templates) settings.templates = {};
-        settings.templates[template.id] = template;
-        saveSettingsDebounced();
+        // Save template using the central API
+        window.promptTemplateManager.saveTemplate(template);
 
         toastr.success('Prompt updated in template');
 
@@ -743,10 +769,8 @@ async function importTemplate() {
                 throw new Error('Invalid template format');
             }
 
-            const settings = extension_settings.STGL;
-            if (!settings.templates) settings.templates = {};
-            settings.templates[data.id] = data;
-            saveSettingsDebounced();
+            // Save imported template using the central API
+            window.promptTemplateManager.saveTemplate(data);
 
             toastr.success('Template imported successfully');
             await renderTemplateList();

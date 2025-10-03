@@ -2243,6 +2243,19 @@ async function init() {
                 storage.saveExtensionSettings();
                 return template;
             },
+            updateTemplate(templateId, updates) {
+                const template = storage.getTemplate(templateId);
+                if (!template) {
+                    if (DEBUG_MODE) console.warn('STGL: Cannot update template - not found:', templateId);
+                    return false;
+                }
+                Object.assign(template, updates, { updatedAt: new Date().toISOString() });
+                storage.saveTemplate(template);
+                return true;
+            },
+            saveTemplate(template) {
+                storage.saveTemplate(template);
+            },
             async applyTemplate(templateId) {
                 // Use TemplateLocker for race condition protection
                 const currentContext = new ChatContext().getCurrent();
