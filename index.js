@@ -815,16 +815,35 @@ const TemplateOps = {
 
         try {
             const promptsArray = Object.values(template.prompts);
-            oai_settings.prompts = promptsArray;
 
-            if (template.promptOrder && template.promptOrder.length > 0 && promptManager?.activeCharacter) {
-                promptManager.setPromptOrderForCharacter(
-                    promptManager.activeCharacter,
-                    template.promptOrder
-                );
+            // Prefer PromptManager API to update prompts; fallback to oai_settings if unavailable
+            if (promptManager && typeof promptManager.setPrompts === 'function') {
+                promptManager.setPrompts(promptsArray);
+            } else {
+                oai_settings.prompts = promptsArray;
             }
 
-            saveSettingsDebounced();
+            // Apply prompt order for the active character if provided
+            if (template.promptOrder && template.promptOrder.length > 0 && promptManager?.activeCharacter) {
+                try {
+                    if (typeof promptManager.removePromptOrderForCharacter === 'function') {
+                        promptManager.removePromptOrderForCharacter(promptManager.activeCharacter);
+                    }
+                    if (typeof promptManager.addPromptOrderForCharacter === 'function') {
+                        promptManager.addPromptOrderForCharacter(promptManager.activeCharacter, template.promptOrder);
+                    }
+                } catch (e) {
+                    console.warn('STGL: Failed to set prompt order for character:', e);
+                }
+            }
+
+            // Persist via PromptManager if available, otherwise fall back to global save
+            if (promptManager && typeof promptManager.saveServiceSettings === 'function') {
+                promptManager.saveServiceSettings();
+            } else {
+                saveSettingsDebounced();
+            }
+
             return true;
         } catch (error) {
             console.error('STGL: Failed to apply template:', error);
@@ -1015,6 +1034,58 @@ class TemplateLocker {
     }
 
     /**
+     * Compare current prompt manager state with a stored template
+     * @param {string} templateId - Template ID to compare against
+     * @returns {boolean} True if prompts match the template
+     */
+    compareWithTemplate(templateId) {
+        const template = this.storage.getTemplate(templateId);
+        if (!template) return false;
+
+        const currentPrompts = oai_settings?.prompts || [];
+        const currentPromptsMap = Array.isArray(currentPrompts)
+            ? currentPrompts.reduce((acc, p) => {
+                if (p.identifier) acc[p.identifier] = p;
+                return acc;
+            }, {})
+            : currentPrompts;
+
+        const templatePrompts = template.prompts || {};
+
+        // Compare number of prompts
+        if (Object.keys(currentPromptsMap).length !== Object.keys(templatePrompts).length) {
+            return false;
+        }
+
+        // Compare each prompt by identifier and content
+        for (const [identifier, templatePrompt] of Object.entries(templatePrompts)) {
+            const currentPrompt = currentPromptsMap[identifier];
+            if (!currentPrompt) return false;
+
+            // Compare critical properties
+            if (currentPrompt.content !== templatePrompt.content) return false;
+        }
+
+        // Compare prompt order if template has one
+        if (template.promptOrder && template.promptOrder.length > 0 && promptManager?.activeCharacter) {
+            const currentOrder = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter);
+
+            // Compare order arrays
+            if (!currentOrder || currentOrder.length !== template.promptOrder.length) {
+                return false;
+            }
+
+            for (let i = 0; i < template.promptOrder.length; i++) {
+                if (currentOrder[i] !== template.promptOrder[i]) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Apply (switch to) a completion template
      * @param {string|null} templateId - Template ID to apply, or null to keep current
      * @param {string} originalContextId - The context ID when this apply was initiated
@@ -1040,11 +1111,20 @@ class TemplateLocker {
 
         try {
             const settings = this.storage.getExtensionSettings();
-            const template = settings.templates?.[trimmedId];
+            let template = settings.templates?.[trimmedId];
 
             if (!template) {
-                console.warn(`STGL: Template not found: ${trimmedId}`);
-                return false;
+                // Fallback: find by template name (case-insensitive)
+                const all = settings.templates || {};
+                const found = Object.values(all).find(t => t && typeof t.name === 'string' && (t.name === trimmedId || t.name.toLowerCase() === trimmedId.toLowerCase()));
+                if (found) {
+                    template = found;
+                    // Use the resolved id for tracking
+                    trimmedId = found.id;
+                } else {
+                    console.warn(`STGL: Template not found: ${trimmedId}`);
+                    return false;
+                }
             }
 
             if (DEBUG_MODE) console.log(`STGL: Applying template: ${template.name} (${trimmedId})`);
@@ -1064,6 +1144,13 @@ class TemplateLocker {
             }
 
             this.currentTemplate = trimmedId;
+            try {
+                if (promptManager && typeof promptManager.render === 'function') {
+                    await promptManager.render();
+                }
+            } catch (e) {
+                if (DEBUG_MODE) console.warn('STGL: Error refreshing promptManager after template apply:', e);
+            }
             return true;
         } catch (error) {
             console.error(`STGL: Failed to apply template "${templateId}":`, error);
@@ -1155,30 +1242,47 @@ class SettingsManager {
      */
     async _applyLocksToUI(locks, originalContextId) {
         if (DEBUG_MODE) console.log('STGL: Applying locks to UI:', locks);
+        const prefs = this.storage.getPreferences ? this.storage.getPreferences() : {};
+
+        // Normalize lock values: treat undefined, null, or empty/whitespace strings as "no lock"
+        const norm = (v) => {
+            if (v === null || v === undefined) return null;
+            if (typeof v === 'string') {
+                const t = v.trim();
+                return t.length ? t : null;
+            }
+            return v;
+        };
+        const nProfile = norm(locks.profile);
+        const nPreset = norm(locks.preset);
+        const nTemplate = norm(locks.template);
 
         // 1. Profile first (changes connection)
-        if (locks.profile !== null && locks.profile !== undefined) {
-            const success = await this.profileLocker.applyProfile(locks.profile, originalContextId);
+        if (nProfile !== null) {
+            const success = await this.profileLocker.applyProfile(nProfile, originalContextId);
             if (!success) {
                 console.warn('STGL: Failed to apply profile lock');
+                try { if (prefs.showNotifications) toastr.error('Failed to apply profile lock'); } catch (e) {}
                 return false;
             }
         }
 
         // 2. Preset second (depends on active connection)
-        if (locks.preset !== null && locks.preset !== undefined) {
-            const success = await this.presetLocker.applyPreset(locks.preset, originalContextId);
+        if (nPreset !== null) {
+            const success = await this.presetLocker.applyPreset(nPreset, originalContextId);
             if (!success) {
                 console.warn('STGL: Failed to apply preset lock');
+                try { if (prefs.showNotifications) toastr.error('Failed to apply preset lock'); } catch (e) {}
                 return false;
             }
         }
 
         // 3. Template last (modifies prompt manager)
-        if (locks.template !== null && locks.template !== undefined) {
-            const success = await this.templateLocker.applyTemplate(locks.template, originalContextId);
+        if (nTemplate !== null) {
+            const success = await this.templateLocker.applyTemplate(nTemplate, originalContextId);
             if (!success) {
                 console.warn('STGL: Failed to apply template lock');
+                try { if (prefs.showNotifications) toastr.error('Failed to apply template lock'); } catch (e) {}
                 return false;
             }
         }
@@ -1199,10 +1303,28 @@ class SettingsManager {
             contextChangeQueue.length = 0;
             this.chatContext.invalidate();
 
+            // Skip auto-apply if we're handling a preset change (let onPresetChanged handle it)
+            if (isHandlingPresetChange) {
+                if (DEBUG_MODE) console.log('STGL: Skipping auto-apply during preset change');
+                return;
+            }
+
             const shouldApply = await this._shouldApplyAutomatically();
             if (shouldApply && !isApplyingSettings) {
                 if (DEBUG_MODE) console.log('STGL: Auto-applying locks on context change');
-                await this.applyLocksForContext();
+                const success = await this.applyLocksForContext();
+                try {
+                    const prefs = this.storage.getPreferences?.() || {};
+                    if (prefs.showNotifications) {
+                        if (success) {
+                            toastr.success('Generation locks applied');
+                        } else {
+                            toastr.error('Failed to apply generation locks');
+                        }
+                    }
+                } catch (e) {
+                    if (DEBUG_MODE) console.warn('STGL: Notification error:', e);
+                }
             }
         } catch (error) {
             console.error('STGL: Error processing context change:', error);
@@ -1256,11 +1378,38 @@ class SettingsManager {
 
             // Only ask if something would actually change
             if (profileDiffers || presetDiffers || templateDiffers) {
-                const contextName = context.characterName || context.groupName || 'this context';
-                const result = await callGenericPopup(
-                    `Apply locks for ${contextName}?`,
-                    POPUP_TYPE.CONFIRM
-                );
+const contextName = context.characterName || context.groupName || 'this context';
+const profileName = resolved.locks.profile || '—';
+const presetName = resolved.locks.preset || '—';
+let templateName = '—';
+if (resolved.locks.template) {
+    const templateObj = this.storage.getTemplate(resolved.locks.template);
+    templateName = templateObj ? templateObj.name : resolved.locks.template;
+}
+// Human-readable sources (Character becomes Group in group chats for labeling)
+const isGroupChatAuto = context.isGroupChat;
+const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChatAuto ? 'Group' : 'Character', group: 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
+const profileSource = resolved.sources?.profile ? toTitleCase(resolved.sources.profile) : null;
+const presetSource = resolved.sources?.preset ? toTitleCase(resolved.sources.preset) : null;
+const templateSource = resolved.sources?.template ? toTitleCase(resolved.sources.template) : null;
+
+const popupBody =
+    `<div style="font-size:1.1em;font-weight:bold;margin-bottom:10px;">
+        Apply saved locks for ${contextName}?
+     </div>
+     <div style="margin-bottom:10px;"><b>This will set:</b></div>
+     <div>
+       Profile → <b>${profileName}</b>${profileSource ? ` <small class="text_muted">(from ${profileSource})</small>` : ''}<br>
+       Preset → <b>${presetName}</b>${presetSource ? ` <small class="text_muted">(from ${presetSource})</small>` : ''}<br>
+       Template → <b>${templateName}</b>${templateSource ? ` <small class="text_muted">(from ${templateSource})</small>` : ''}
+     </div>
+     <div style="margin-top:10px;">Proceed?</div>`;
+const result = await callGenericPopup(
+    popupBody,
+    POPUP_TYPE.CONFIRM,
+    '',
+    { okButton: 'Apply', cancelButton: 'Skip' }
+);
                 return result === POPUP_RESULT.AFFIRMATIVE;
             }
         }
@@ -1382,6 +1531,7 @@ class SettingsManager {
 
 let isApplyingSettings = false;
 let processingContext = false;
+let isHandlingPresetChange = false;
 const contextChangeQueue = [];
 
 // ============================================================================
@@ -1462,10 +1612,66 @@ async function onGroupMemberDrafted(chId) {
 }
 
 /**
- * Handle manual preset changes - update display
+ * Handle manual preset changes - check if locked template needs restoration
  */
-function onPresetChanged() {
-    if (DEBUG_MODE) console.log('STGL: Preset changed manually');
+async function onPresetChanged() {
+    console.log('STGL: Preset changed event received');
+
+    // Set flag to prevent auto-apply during preset change handling
+    isHandlingPresetChange = true;
+
+    if (!settingsManager) {
+        console.log('STGL: No settings manager, updating display only');
+        updateDisplay();
+        isHandlingPresetChange = false;
+        return;
+    }
+
+    try {
+        // Get current locked template
+        const context = settingsManager.chatContext.getCurrent();
+        const preferences = settingsManager.storage.getPreferences();
+        const resolved = settingsManager.priorityResolver.resolve(context, preferences);
+
+        console.log('STGL: Resolved template lock:', resolved.locks.template);
+
+        // If there's a locked template, check if we need to restore it
+        if (resolved.locks.template) {
+            // Check if current prompts match the locked template
+            const promptsMatchTemplate = settingsManager.templateLocker.compareWithTemplate(resolved.locks.template);
+
+            console.log('STGL: Prompts match template?', promptsMatchTemplate);
+
+            // Template differs from locked one - ask to restore
+            if (!promptsMatchTemplate) {
+                const templateObj = settingsManager.storage.getTemplate(resolved.locks.template);
+                const templateName = templateObj ? templateObj.name : resolved.locks.template;
+                const sourceName = resolved.sources?.template || 'unknown';
+
+                const message = `The preset you selected may have changed your completion template.<br><br>` +
+                    `Do you want to restore the locked template?<br><br>` +
+                    `<b>${templateName}</b> <small class="text_muted">(locked from ${sourceName})</small>`;
+
+                const result = await callGenericPopup(
+                    message,
+                    POPUP_TYPE.CONFIRM,
+                    '',
+                    { okButton: 'Restore Template', cancelButton: 'Keep New Template' }
+                );
+
+                if (result === POPUP_RESULT.AFFIRMATIVE) {
+                    const originalContextId = context.primaryId;
+                    await settingsManager.templateLocker.applyTemplate(resolved.locks.template, originalContextId);
+                    toastr.success('Template restored');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('STGL: Error checking template after preset change:', error);
+    } finally {
+        isHandlingPresetChange = false;
+    }
+
     updateDisplay();
 }
 
@@ -1511,7 +1717,17 @@ function updateDisplay() {
                 // Fetch the template object to get its name!
                 const template = settingsManager.storage.getTemplate(locks.template);
                 const templateName = template ? template.name : 'Unknown Template';
-                parts.push(`<span><i class="fa-solid fa-file-lines" title="Template"></i> ${templateName} <small class="text_muted">(${sources.template})</small></span>`);
+
+                // Check if current prompts match the locked template
+                const isActive = settingsManager.templateLocker.compareWithTemplate(locks.template);
+
+                let templateDisplay = `<i class="fa-solid fa-file-lines" title="Template"></i> ${templateName} <small class="text_muted">(${sources.template})</small>`;
+
+                if (!isActive) {
+                    templateDisplay += ` <i class="fa-solid fa-triangle-exclamation" style="color: orange;" title="Locked template is not currently active"></i> <small style="color: orange;">(not active)</small>`;
+                }
+
+                parts.push(`<span>${templateDisplay}</span>`);
             }
             html += parts.join(' | ');
             html += '</div>';
@@ -1782,34 +1998,36 @@ async function refreshPopupAfterSave() {
  * Following ST's PromptManager pattern exactly
  */
 function initializePriorityDragDrop() {
-    const $priorityList = $('#stgl-priority-list');
+    // Scope to the popup root for robustness (mirrors Logit Bias/World Info)
+    const $root = $(currentPopupInstance?.dlg || document);
+    const $priorityList = $root.find('#stgl-priority-list');
 
     if (!$priorityList.length) {
         console.warn('STGL: Priority list element not found');
         return;
     }
-
     if (typeof $.fn.sortable !== 'function') {
         console.error('STGL: jQuery UI sortable is not available');
         return;
     }
 
-    // Use ST's exact sortable pattern
-    $priorityList.sortable({
-        delay: getSortableDelay(),  // 50ms desktop, 750ms mobile
-        handle: isMobile() ? '.drag-handle' : null,  // Allow dragging whole item on desktop
-        items: '.completion_prompt_manager_prompt_draggable',
-        update: function(event, ui) {
-            // Get updated order from DOM
-            const priorityOrder = $priorityList.sortable('toArray', { attribute: 'data-source' });
+    // Destroy previous instance if exists (prevents inert lists on reopen)
+    if ($priorityList.sortable('instance') !== undefined) {
+        $priorityList.sortable('destroy');
+    }
 
-            // Update settings using StorageAdapter to ensure consistency
+    $priorityList.sortable({
+        delay: getSortableDelay(),
+        handle: '.drag-handle', // always use explicit handle
+        items: '> .completion_prompt_manager_prompt_draggable',
+        tolerance: 'pointer',
+        update: function () {
+            const priorityOrder = $priorityList.sortable('toArray', { attribute: 'data-source' });
             const storage = new StorageAdapter();
             storage.updatePreference('priorityOrder', priorityOrder);
-
             if (DEBUG_MODE) console.log('STGL: Priority order updated:', priorityOrder);
         }
-    });
+    }).disableSelection();
 
     if (DEBUG_MODE) console.log('STGL: Sortable initialized for priority list');
 }
