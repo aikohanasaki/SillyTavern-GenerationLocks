@@ -11,8 +11,6 @@ import { lodash, Handlebars } from '../../../../lib.js';
 import { selected_group, groups, editGroup } from '../../../group-chats.js';
 import { executeSlashCommandsWithOptions } from '../../../slash-commands.js';
 import { oai_settings, promptManager, getChatCompletionModel } from '../../../openai.js';
-import { isMobile } from '../../../RossAscends-mods.js';
-import { getSortableDelay } from '../../../utils.js';
 import { MigrationManager } from './migration.js';
 import { injectPromptTemplateManagerButton } from './promptManager.js';
 
@@ -55,13 +53,13 @@ const LOCKABLE_ITEMS = {
 
 const DEFAULT_SETTINGS = {
     moduleSettings: {
-        preferIndividualCharacterInGroup: false,
+        preferIndividualCharacterInGroup: true,
         showNotifications: true,
         autoApplyOnContextChange: AUTO_APPLY_MODES.ASK,
         lockingMode: LOCKING_MODES.CHARACTER,
         // Priority order: first in array wins (highest priority)
-        // Default: CHAT > CHARACTER/GROUP > MODEL
-        priorityOrder: [SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL]
+        // Default: MODEL > CHAT > CHARACTER/GROUP
+        priorityOrder: [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER]
     },
     characterLocks: {},  // { [chId]: { profile, preset, template } }
     modelLocks: {},      // { [model]: { preset, template } } - NO profile field
@@ -599,10 +597,14 @@ class PriorityResolver {
 
         const { isGroupChat } = context;
 
-        // Start with user's priority order
+        // Validate and normalize priority order; fallback to default if invalid
+        const validSources = new Set([SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL]);
+        const baseOrder = Array.isArray(priorityOrder) ? priorityOrder.filter(s => validSources.has(s)) : [];
+        const order = baseOrder.length ? baseOrder : [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER];
+
         const cascade = [];
 
-        for (const source of priorityOrder) {
+        for (const source of order) {
             // Map CHARACTER to GROUP in group chats when in character mode
             if (source === SETTING_SOURCES.CHARACTER) {
                 const effectiveSource = isGroupChat && lockingMode === LOCKING_MODES.CHARACTER
@@ -1057,26 +1059,74 @@ class TemplateLocker {
             return false;
         }
 
-        // Compare each prompt by identifier and content
+        // Compare each prompt by identifier, content, and key attributes
         for (const [identifier, templatePrompt] of Object.entries(templatePrompts)) {
             const currentPrompt = currentPromptsMap[identifier];
             if (!currentPrompt) return false;
 
-            // Compare critical properties
+            // Compare content
             if (currentPrompt.content !== templatePrompt.content) return false;
+
+            // Extended attribute comparison (tolerant defaults)
+            const norm = (p) => ({
+                role: p?.role ?? null,
+                system_prompt: !!p?.system_prompt,
+                marker: !!p?.marker,
+                injection_position: p?.injection_position ?? null,
+                injection_depth: p?.injection_depth ?? null,
+                injection_order: p?.injection_order ?? null,
+                injection_trigger: Array.isArray(p?.injection_trigger) ? [...new Set(p.injection_trigger)].sort() : null,
+                forbid_overrides: p?.forbid_overrides ?? null,
+            });
+
+            const arrEq = (x, y) => {
+                if (x === null && y === null) return true;
+                if (!Array.isArray(x) || !Array.isArray(y)) return x === y;
+                if (x.length !== y.length) return false;
+                for (let i = 0; i < x.length; i++) {
+                    if (x[i] !== y[i]) return false;
+                }
+                return true;
+            };
+
+            const a = norm(currentPrompt);
+            const b = norm(templatePrompt);
+
+            if (
+                a.role !== b.role ||
+                a.system_prompt !== b.system_prompt ||
+                a.marker !== b.marker ||
+                a.injection_position !== b.injection_position ||
+                a.injection_depth !== b.injection_depth ||
+                a.injection_order !== b.injection_order ||
+                a.forbid_overrides !== b.forbid_overrides ||
+                !arrEq(a.injection_trigger, b.injection_trigger)
+            ) {
+                return false;
+            }
         }
 
         // Compare prompt order if template has one
         if (template.promptOrder && template.promptOrder.length > 0 && promptManager?.activeCharacter) {
-            const currentOrder = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter);
+            const currentOrder = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) || [];
+            const tplOrder = Array.isArray(template.promptOrder) ? template.promptOrder : [];
 
-            // Compare order arrays
-            if (!currentOrder || currentOrder.length !== template.promptOrder.length) {
+            // Compare order arrays structurally (identifier + enabled), not by object reference
+            if (currentOrder.length !== tplOrder.length) {
                 return false;
             }
 
-            for (let i = 0; i < template.promptOrder.length; i++) {
-                if (currentOrder[i] !== template.promptOrder[i]) {
+            const normalizeOrder = (arr) => arr.map(e => ({
+                identifier: e?.identifier ?? null,
+                // default enabled to true if missing
+                enabled: e?.enabled === false ? false : true,
+            }));
+
+            const a = normalizeOrder(currentOrder);
+            const b = normalizeOrder(tplOrder);
+
+            for (let i = 0; i < a.length; i++) {
+                if (a[i].identifier !== b[i].identifier || a[i].enabled !== b[i].enabled) {
                     return false;
                 }
             }
@@ -1711,10 +1761,26 @@ function updateDisplay() {
             const parts = [];
             
             if (locks.profile) {
-                parts.push(`<span><i class="fa-solid fa-plug" title="Profile"></i> ${locks.profile} <small class="text_muted">(${toTitleCase(sources.profile)})</small></span>`);
+                const activeProfile = settingsManager.profileLocker.getCurrentProfile();
+                const profileMismatch = !!locks.profile && locks.profile !== activeProfile;
+
+                let profileDisplay = `<i class="fa-solid fa-plug" title="Profile"></i> ${locks.profile} <small class="text_muted">(${toTitleCase(sources.profile)})</small>`;
+                if (profileMismatch) {
+                    profileDisplay += ` <i class="fa-solid fa-triangle-exclamation" style="color: orange;" title="Locked profile is not currently active"></i> <small style="color: orange;">(not active)</small>`;
+                }
+
+                parts.push(`<span>${profileDisplay}</span>`);
             }
             if (locks.preset) {
-                parts.push(`<span><i class="fa-solid fa-sliders" title="Preset"></i> ${locks.preset} <small class="text_muted">(${toTitleCase(sources.preset)})</small></span>`);
+                const activePreset = settingsManager.presetLocker.getCurrentPreset();
+                const presetMismatch = !!locks.preset && locks.preset !== activePreset;
+
+                let presetDisplay = `<i class="fa-solid fa-sliders" title="Preset"></i> ${locks.preset} <small class="text_muted">(${toTitleCase(sources.preset)})</small>`;
+                if (presetMismatch) {
+                    presetDisplay += ` <i class="fa-solid fa-triangle-exclamation" style="color: orange;" title="Locked preset is not currently active"></i> <small style="color: orange;">(not active)</small>`;
+                }
+
+                parts.push(`<span>${presetDisplay}</span>`);
             }
             if (locks.template) {
                 // Fetch the template object to get its name!
@@ -1819,15 +1885,17 @@ const lockManagementTemplate = Handlebars.compile(`
     <div class="completion_prompt_manager_popup_entry_form_control">
         <h4 class="standoutHeader">📊 Priority Order:</h4>
         <div class="marginTop10">
-            <small class="text_muted">Drag to reorder (top = highest priority)</small>
-            <ul id="stgl-priority-list" class="marginTop10">
-                {{#each priorityItems}}
-                <li class="completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable" data-source="{{value}}">
-                    <span class="drag-handle">☰</span>
-                    <span>{{label}}</span>
-                </li>
+            <small class="text_muted">Type 1 (highest) to 3 (lowest). Boxes will reorder automatically.</small>
+            <div id="stgl-priority-boxes" class="marginTop10">
+                {{#each priorityBoxes}}
+                <div class="completion_prompt_manager_prompt stgl-priority-box" data-source="{{source}}">
+                    <div class="flex-container flexGap10 alignitemscenter">
+                        <label style="min-width: 120px;">{{label}}</label>
+                        <input type="number" class="stgl-priority-input" data-source="{{source}}" min="1" max="3" value="{{number}}">
+                    </div>
+                </div>
                 {{/each}}
-            </ul>
+            </div>
         </div>
     </div>
 
@@ -1912,7 +1980,7 @@ function formatLockInfo(lock) {
         parts.push(`Template: ${tplDisplay}`);
     }
 
-    return parts.length > 0 ? parts.join('<br>') : 'No locks set';
+    return parts.length > 0 ? parts.join(' | ') : 'No locks set';
 }
 
 /**
@@ -1944,11 +2012,18 @@ async function getPopupContent() {
         [SETTING_SOURCES.MODEL]: '🤖 Model'
     };
 
-    const priorityItems = (preferences.priorityOrder || [SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL])
-        .map(source => ({
-            value: source,
-            label: sourceLabels[source] || source
-        }));
+    const order = Array.isArray(preferences.priorityOrder) && preferences.priorityOrder.length
+        ? preferences.priorityOrder
+        : [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER];
+
+    const numMap = {};
+    order.forEach((s, idx) => { numMap[s] = idx + 1; });
+
+    const priorityBoxes = [
+        { source: SETTING_SOURCES.MODEL, label: sourceLabels[SETTING_SOURCES.MODEL] || 'Model', number: numMap[SETTING_SOURCES.MODEL] || 3 },
+        { source: SETTING_SOURCES.CHAT, label: sourceLabels[SETTING_SOURCES.CHAT] || 'Chat', number: numMap[SETTING_SOURCES.CHAT] || 2 },
+        { source: SETTING_SOURCES.CHARACTER, label: sourceLabels[SETTING_SOURCES.CHARACTER] || (isGroupChat ? 'Group' : 'Character'), number: numMap[SETTING_SOURCES.CHARACTER] || 3 },
+    ].sort((a, b) => a.number - b.number);
 
     // Auto-apply options
     const autoApplyOptions = [
@@ -1979,7 +2054,7 @@ async function getPopupContent() {
         groupName: context.groupName,
         modelName: context.modelName,
         checkboxes,
-        priorityItems,
+        priorityBoxes,
         autoApplyOptions,
         lockingModeOptions,
         characterLocks: formatLockInfo(characterLocks),
@@ -2004,43 +2079,57 @@ async function refreshPopupAfterSave() {
     }, 200);
 }
 
+
 /**
- * Initialize drag-and-drop for priority list using jQuery UI sortable
- * Following ST's PromptManager pattern exactly
+ * Initialize numeric priority inputs and live reordering
  */
-function initializePriorityDragDrop() {
-    // Scope to the popup root for robustness (mirrors Logit Bias/World Info)
-    const $root = $(currentPopupInstance?.dlg || document);
-    const $priorityList = $root.find('#stgl-priority-list');
+function initializePriorityInputs() {
+    try {
+        const root = currentPopupInstance?.dlg || document;
+        const container = root.querySelector('#stgl-priority-boxes');
+        if (!container) return;
 
-    if (!$priorityList.length) {
-        console.warn('STGL: Priority list element not found');
-        return;
+        const clamp = (value) => {
+            const n = parseInt(String(value || '').trim(), 10);
+            if (isNaN(n)) return 3;
+            return Math.min(3, Math.max(1, n));
+        };
+
+        const readEntries = () => {
+            const boxes = Array.from(container.querySelectorAll('.stgl-priority-box'));
+            return boxes.map(box => {
+                const source = box.getAttribute('data-source');
+                const input = box.querySelector('.stgl-priority-input');
+                const number = clamp(input?.value);
+                return { box, source, number, input };
+            });
+        };
+
+        const renderOrder = () => {
+            const entries = readEntries().sort((a, b) => a.number - b.number);
+            entries.forEach(e => container.appendChild(e.box));
+        };
+
+        container.addEventListener('input', (e) => {
+            const target = e.target;
+            if (target && target.classList && target.classList.contains('stgl-priority-input')) {
+                target.value = clamp(target.value);
+                renderOrder();
+            }
+        });
+
+        container.addEventListener('change', (e) => {
+            const target = e.target;
+            if (target && target.classList && target.classList.contains('stgl-priority-input')) {
+                target.value = clamp(target.value);
+                renderOrder();
+            }
+        });
+
+        renderOrder();
+    } catch (e) {
+        if (DEBUG_MODE) console.warn('STGL: Failed to initialize priority numeric inputs:', e);
     }
-    if (typeof $.fn.sortable !== 'function') {
-        console.error('STGL: jQuery UI sortable is not available');
-        return;
-    }
-
-    // Destroy previous instance if exists (prevents inert lists on reopen)
-    if ($priorityList.sortable('instance') !== undefined) {
-        $priorityList.sortable('destroy');
-    }
-
-    $priorityList.sortable({
-        delay: getSortableDelay(),
-        handle: '.drag-handle', // always use explicit handle
-        items: '> .completion_prompt_manager_prompt_draggable',
-        tolerance: 'pointer',
-        update: function () {
-            const priorityOrder = $priorityList.sortable('toArray', { attribute: 'data-source' });
-            const storage = new StorageAdapter();
-            storage.updatePreference('priorityOrder', priorityOrder);
-            if (DEBUG_MODE) console.log('STGL: Priority order updated:', priorityOrder);
-        }
-    }).disableSelection();
-
-    if (DEBUG_MODE) console.log('STGL: Sortable initialized for priority list');
 }
 
 /**
@@ -2255,8 +2344,8 @@ async function showLockManagementPopup() {
         currentPopupInstance = new Popup(contentWithHeader, POPUP_TYPE.TEXT, '', popupOptions);
         await currentPopupInstance.show();
 
-        // Initialize drag-drop after popup is rendered (following ST's pattern)
-        initializePriorityDragDrop();
+        // Initialize numeric inputs + live reordering after popup is rendered
+        initializePriorityInputs();
     } catch (error) {
         console.error('STGL: Error showing popup:', error);
         currentPopupInstance = null;
@@ -2284,13 +2373,17 @@ async function handlePopupClose(popup) {
             }
         }
 
-        // Save priority order from drag list
-        const priorityList = popupElement.querySelector('#stgl-priority-list');
-        if (priorityList) {
-            const priorityOrder = Array.from(priorityList.querySelectorAll('.completion_prompt_manager_prompt_draggable'))
-                .map(item => item.getAttribute('data-source'));
+        // Save priority order from numeric inputs
+        const inputs = popupElement.querySelectorAll('.stgl-priority-input');
+        if (inputs && inputs.length) {
+            const entries = Array.from(inputs).map(inp => ({
+                source: inp.getAttribute('data-source'),
+                number: Math.max(1, Math.min(3, parseInt(inp.value || '0', 10) || 3))
+            }));
+            entries.sort((a, b) => a.number - b.number);
+            const priorityOrder = entries.map(e => e.source);
             storage.updatePreference('priorityOrder', priorityOrder);
-            if (DEBUG_MODE) console.log('STGL: Priority order saved:', priorityOrder);
+            if (DEBUG_MODE) console.log('STGL: Priority order saved (numeric):', priorityOrder);
         }
 
         // Save auto-apply mode
