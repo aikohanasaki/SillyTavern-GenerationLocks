@@ -1103,7 +1103,7 @@ class TemplateLocker {
             return false;
         }
 
-        const trimmedId = templateId.trim();
+        let trimmedId = templateId.trim();
         if (!trimmedId) {
             console.warn('STGL: Empty template ID provided');
             return false;
@@ -1374,7 +1374,7 @@ class SettingsManager {
 
             const profileDiffers = resolved.locks.profile && resolved.locks.profile !== currentProfile;
             const presetDiffers = resolved.locks.preset && resolved.locks.preset !== currentPreset;
-            const templateDiffers = resolved.locks.template && resolved.locks.template !== currentTemplate;
+            const templateDiffers = resolved.locks.template && !this.templateLocker.compareWithTemplate(resolved.locks.template);
 
             // Only ask if something would actually change
             if (profileDiffers || presetDiffers || templateDiffers) {
@@ -1694,6 +1694,9 @@ function updateDisplay() {
 
     try {
         const { locks, sources } = settingsManager.getCurrentLocks();
+        const context = settingsManager.chatContext.getCurrent();
+        const isGroupChat = context.isGroupChat;
+        const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Group' : 'Character', group: 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
 
         // Remove existing display
         const existing = document.getElementById('stgl-status-indicator');
@@ -1708,10 +1711,10 @@ function updateDisplay() {
             const parts = [];
             
             if (locks.profile) {
-                parts.push(`<span><i class="fa-solid fa-plug" title="Profile"></i> ${locks.profile} <small class="text_muted">(${sources.profile})</small></span>`);
+                parts.push(`<span><i class="fa-solid fa-plug" title="Profile"></i> ${locks.profile} <small class="text_muted">(${toTitleCase(sources.profile)})</small></span>`);
             }
             if (locks.preset) {
-                parts.push(`<span><i class="fa-solid fa-sliders" title="Preset"></i> ${locks.preset} <small class="text_muted">(${sources.preset})</small></span>`);
+                parts.push(`<span><i class="fa-solid fa-sliders" title="Preset"></i> ${locks.preset} <small class="text_muted">(${toTitleCase(sources.preset)})</small></span>`);
             }
             if (locks.template) {
                 // Fetch the template object to get its name!
@@ -1721,7 +1724,7 @@ function updateDisplay() {
                 // Check if current prompts match the locked template
                 const isActive = settingsManager.templateLocker.compareWithTemplate(locks.template);
 
-                let templateDisplay = `<i class="fa-solid fa-file-lines" title="Template"></i> ${templateName} <small class="text_muted">(${sources.template})</small>`;
+                let templateDisplay = `<i class="fa-solid fa-file-lines" title="Template"></i> ${templateName} <small class="text_muted">(${toTitleCase(sources.template)})</small>`;
 
                 if (!isActive) {
                     templateDisplay += ` <i class="fa-solid fa-triangle-exclamation" style="color: orange;" title="Locked template is not currently active"></i> <small style="color: orange;">(not active)</small>`;
@@ -1900,7 +1903,14 @@ function formatLockInfo(lock) {
     const parts = [];
     if (lock.profile) parts.push(`Profile: ${lock.profile}`);
     if (lock.preset) parts.push(`Preset: ${lock.preset}`);
-    if (lock.template) parts.push(`Template: ${lock.template}`);
+    if (lock.template) {
+        let tplDisplay = lock.template;
+        try {
+            const t = (settingsManager?.storage || new StorageAdapter())?.getTemplate(lock.template);
+            if (t?.name) tplDisplay = t.name;
+        } catch (e) {}
+        parts.push(`Template: ${tplDisplay}`);
+    }
 
     return parts.length > 0 ? parts.join('<br>') : 'No locks set';
 }
@@ -1954,7 +1964,8 @@ async function getPopupContent() {
     ];
 
     // Get current locks
-    const characterLocks = isGroupChat ? null : storage.getCharacterLock(context.characterName);
+    const chIndex = !isGroupChat && context.characterName && Array.isArray(characters) ? characters.findIndex(x => x.name === context.characterName) : -1;
+    const characterLocks = isGroupChat ? null : storage.getCharacterLock(chIndex !== -1 ? chIndex : context.characterName);
     const groupLocks = isGroupChat ? storage.getGroupLock(context.groupId) : null;
     const chatLocks = storage.getChatLock();
     const modelLocks = storage.getModelLock(context.modelName);
@@ -2225,6 +2236,7 @@ async function showLockManagementPopup() {
             event.stopPropagation();
             if (settingsManager) {
                 await settingsManager.applyLocksForContext();
+                updateDisplay();
                 toastr.success('Locks applied');
             }
         }

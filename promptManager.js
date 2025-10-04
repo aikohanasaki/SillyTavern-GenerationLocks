@@ -369,12 +369,18 @@ window.stglDeleteTemplate = async function(id) {
  * Apply template
  */
 window.stglApplyTemplate = async function(id) {
-    if (window.promptTemplateManager.applyTemplate(id)) {
-        toastr.success('Template applied successfully!');
-        if (mainPopup) {
-            await mainPopup.completeAffirmative();
+    try {
+        const ok = await window.promptTemplateManager.applyTemplate(id);
+        if (ok) {
+            toastr.success('Template applied successfully!');
+            if (mainPopup) {
+                await mainPopup.completeAffirmative();
+            }
+        } else {
+            toastr.error('Failed to apply template');
         }
-    } else {
+    } catch (e) {
+        console.error('STGL: Error applying template:', e);
         toastr.error('Failed to apply template');
     }
 };
