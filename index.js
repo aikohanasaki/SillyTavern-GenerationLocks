@@ -1852,26 +1852,26 @@ const lockManagementTemplate = Handlebars.compile(`
 
 <div class="completion_prompt_manager_popup_entry_form_control">
     <h4 class="standoutHeader">📊 Priority Order:</h4>
-    <div id="stgl-priority-dropdowns" class="marginTop10 flex-container flexFlowColumn flexGap10">
-        <div class="flex-container flexGap10 alignitemscenter">
-            <label style="min-width:120px;">1st (highest):</label>
-            <select id="stgl-priority-select-1" class="text_pole">
+    <div id="stgl-priority-dropdowns" class="marginTop10 alignItemsCenter">
+        <div class="flex-container flexFlowRow flexGap10">
+            <label class="flex1">1st (highest):</label>
+            <select id="stgl-priority-select-1" class="flex1">
                 {{#each priorityOptions1}}
                 <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
                 {{/each}}
             </select>
         </div>
-        <div class="flex-container flexGap10 alignitemscenter">
-            <label style="min-width:120px;">2nd:</label>
-            <select id="stgl-priority-select-2" class="text_pole">
+        <div class="flex-container flexFlowRow flexGap10">
+            <label class="flex1">2nd:</label>
+            <select id="stgl-priority-select-2" class="flex1">
                 {{#each priorityOptions2}}
                 <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
                 {{/each}}
             </select>
         </div>
-        <div class="flex-container flexGap10 alignitemscenter">
-            <label style="min-width:120px;">3rd (lowest):</label>
-            <select id="stgl-priority-select-3" class="text_pole">
+        <div class="flex-container flexFlowRow flexGap10">
+            <label class="flex1">3rd (lowest):</label>
+            <select id="stgl-priority-select-3" class="flex1">
                 {{#each priorityOptions3}}
                 <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
                 {{/each}}
@@ -1880,7 +1880,7 @@ const lockManagementTemplate = Handlebars.compile(`
     </div>
 </div>
 
-<div class="completion_prompt_manager_popup_entry_form_control">
+<div class="completion_prompt_manager_popup_entry_form_control alignItemsCenter">
     <label class="checkbox_label">
         <input type="checkbox" id="stgl-prefer-individual" {{#if preferIndividualCharacterInGroup}}checked{{/if}}>
         <span>In group chats, always prefer individual character settings over group settings</span>
@@ -2284,7 +2284,6 @@ customButtons.push({
     });
 
     const popupOptions = {
-        wide: true,
         allowVerticalScrolling: true,
         customButtons,
         cancelButton: 'Close',

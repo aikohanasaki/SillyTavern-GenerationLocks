@@ -412,13 +412,18 @@ window.stglViewPrompts = async function(templateId) {
 
     const content = document.createElement('div');
     content.innerHTML = `
-        <div class="flex-container flexFlowColumn" style="gap: 10px;">
+        <div class="flex-container flexFlowColumn flexGap10">
             <div class="title_restorable">
                 <h3>${escapeHtml(template.name)}</h3>
             </div>
             ${template.description ? `<div class="text_muted">${escapeHtml(template.description)}</div>` : ''}
 
             <ul id="stgl-prompt-order-list" class="text_pole ui-sortable">
+                <li class="flex-container alignItemsCenter justifySpaceBetween">
+                    <span>Name</span>
+                    <span>Role</span>
+                </li>
+                <li class="marginBot5"><hr></li>
                 ${orderedPrompts.map(prompt => {
                     const isMarker = prompt.marker;
                     const isSystemPrompt = prompt.system_prompt;
@@ -436,11 +441,11 @@ window.stglViewPrompts = async function(templateId) {
                         : `<a class="stgl-expand-prompt" data-identifier="${escapeHtml(prompt.identifier)}">${escapeHtml(prompt.name || prompt.identifier)}</a>`;
 
                     const editButton = !isMarker
-                        ? `<span class="stgl-edit-prompt fa-solid fa-pencil fa-xs" data-identifier="${escapeHtml(prompt.identifier)}" title="Edit prompt" style="margin-left: 8px; opacity: 0.4; cursor: pointer;"></span>`
+                        ? `<span class="stgl-edit-prompt fa-solid fa-pencil fa-xs interactable" data-identifier="${escapeHtml(prompt.identifier)}" title="Edit prompt"></span>`
                         : '';
 
                     return `
-                        <li class="ui-sortable-handle completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable ${isMarker ? 'stgl_prompt_manager_marker' : ''}" data-identifier="${escapeHtml(prompt.identifier)}">
+                        <li class="ui-sortable-handle completion_prompt_manager_prompt completion_prompt_manager_prompt_draggable ${isMarker ? 'stgl_prompt_manager_marker' : ''} flex-container alignItemsCenter justifySpaceBetween" data-identifier="${escapeHtml(prompt.identifier)}">
                             <span class="drag-handle">☰</span>
                             <span class="completion_prompt_manager_prompt_name">
                                 ${isMarker ? '<span class="fa-fw fa-solid fa-thumb-tack" title="Marker"></span>' : ''}
@@ -452,10 +457,11 @@ window.stglViewPrompts = async function(templateId) {
                                 ${roleIcon ? `<span data-role="${escapeHtml(prompt.role)}" class="fa-xs fa-solid ${roleIcon}" title="${roleTitle}"></span>` : ''}
                                 ${isInjectionPrompt ? `<small class="prompt-manager-injection-depth">@ ${escapeHtml(prompt.injection_depth)}</small>` : ''}
                             </span>
+                            <span class="fontsize90p">${escapeHtml(prompt.role || 'system')}</span>
                         </li>
                         ${!isMarker ? `
                             <li class="inline-drawer stgl_prompt_drawer" data-identifier="${escapeHtml(prompt.identifier)}">
-                                <div class="inline-drawer-content text_pole padding10" style="background: var(--black30a); display: none;">
+                                <div class="inline-drawer-content text_pole padding10">
                                     ${prompt.injection_position === 1 ? `
                                         <div class="flex-container flexGap10 marginBot5 fontsize90p text_muted">
                                             <span><strong>Position:</strong> Absolute (In-Chat)</span>
@@ -463,12 +469,11 @@ window.stglViewPrompts = async function(templateId) {
                                             <span><strong>Order:</strong> ${prompt.injection_order || 100}</span>
                                         </div>
                                     ` : ''}
-                                    <div class="code">
-${escapeHtml(prompt.content || '(empty)')}
+                                    <div class="code">${escapeHtml(prompt.content || '(empty)')}
                                     </div>
                                 </div>
                             </li>
-                            <li class="inline-drawer stgl_prompt_edit_drawer" id="stgl-edit-drawer-${escapeHtml(prompt.identifier)}" style="display: none;">
+                            <li class="inline-drawer stgl_prompt_edit_drawer" id="stgl-edit-drawer-${escapeHtml(prompt.identifier)}">
                                 <div class="inline-drawer-content">
                                 </div>
                             </li>
@@ -490,6 +495,9 @@ ${escapeHtml(prompt.content || '(empty)')}
         large: true,
         allowVerticalScrolling: true,
         onOpen: () => {
+            // Initialize collapsed state without inline styles
+            document.querySelectorAll('.stgl_prompt_drawer .inline-drawer-content').forEach(el => { el.style.display = 'none'; });
+            document.querySelectorAll('.stgl_prompt_edit_drawer').forEach(el => { el.style.display = 'none'; });
             // Setup click handlers for expanding/collapsing prompts
             document.querySelectorAll('.stgl-expand-prompt').forEach(link => {
                 link.addEventListener('click', (e) => {
