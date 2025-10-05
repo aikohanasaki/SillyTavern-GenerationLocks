@@ -1,4 +1,4 @@
-# ⚠️ WIP as of Octobher 5, 2025 
+# ⚠️ WIP as of October 5, 2025 
 ## ⚠️ Do not install unless you want to beta test and bug hunt!
 
 # SillyTavern Generation Locks (STGL)
