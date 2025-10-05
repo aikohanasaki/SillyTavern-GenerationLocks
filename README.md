@@ -1,3 +1,6 @@
+# ⚠️ WIP as of Octobher 5, 2025 
+## ⚠️ Do not install unless you want to beta test and bug hunt!
+
 # SillyTavern Generation Locks (STGL)
 
 Advanced generation settings management with multi-dimensional locking for connection profiles, generation presets, and completion templates.
