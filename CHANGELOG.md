@@ -1,119 +1,101 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.0.1] - 2025-10-04
+
+### Changed
+- Priority labeling unified in group contexts:
+  - All user-facing labels now show “Character/Group” when in group chats (status indicator, auto-apply confirmation, preset-restore prompt).
+- Priority order UI clarified and simplified:
+  - Three non-cascading selects with options: Model, Chat, Character/Group.
+  - Duplicates are refused at Save time; popup remains open and shows a toast.
+  - Default order remains: Model > Chat > Character/Group.
+- Individual-over-Group behavior refined:
+  - Applies only when “In group chats, always prefer individual character settings over group settings” is enabled.
+  - Overlays individual character values ONLY over Group winners (at the Character/Group position).
+  - Does NOT override Chat or Model winners.
+  - Applied at GROUP_MEMBER_DRAFTED (generation time), not in the general resolver cascade.
+
+### Removed
+- Locking Modes (documentation/UI): the system no longer exposes or references “Character/Group mode” or “Model mode”.
+- INDIVIDUAL leg from the resolver’s cascade: per-character overlay in groups is handled post-resolution during the drafting event instead.
+
+### Docs
+- README updated to reflect:
+  - Removal of Locking Modes.
+  - Non-cascading priority selects with save-time uniqueness validation.
+  - The Individual-over-Group overlay semantics (Group-only overlay, gated by the checkbox).
+  - Context-aware labeling (“Character/Group”).
+
+### Internal
+- PriorityResolver._buildCascade no longer injects INDIVIDUAL for group contexts.
+- onGroupMemberDrafted now merges individual locks onto resolved winners, overlaying only items whose winner is Group.
+- Tooltips and messages updated to reflect the Group-only overlay constraint.
+
+### Migration
+- No changes. Existing migration from STCL/CCPM remains intact.
+
+### Compatibility
+- No breaking API changes. Behavior change: individual overlays no longer supersede Model/Chat winners in group chats; they only supersede Group where present.
+
+---
+
 ## [1.0.0] - 2025-10-02
 
 ### 🎉 Initial Release
 
 Complete implementation of Generation Locks system merging functionality from:
-- **SillyTavern-CharacterLocks** (STCL) - Connection profile + preset locking
-- **SillyTavern-CCPromptManager** (CCPM) - Completion template management
+- SillyTavern-CharacterLocks (STCL) — Connection profile + preset locking
+- SillyTavern-CCPromptManager (CCPM) — Completion template management
 
 ### ✨ Core Features
 
 #### Multi-Dimensional Locking System
-- **Three lockable items**: Connection Profile, Generation Preset, Completion Template
-- **Independent item resolution**: Each item finds its own winner through priority cascade
-- **Five lock dimensions**: Character, Model, Chat, Group, Individual (in groups)
-- **Flexible priority system**: Two locking modes + multiple preference toggles
+- Three lockable items: Connection Profile, Generation Preset, Completion Template
+- Independent item resolution: Each item finds its own winner through priority cascade
+- Five lock dimensions: Character, Model, Chat, Group, Individual (in groups)
 
 #### Lock Dimensions
-1. **Character Locks** - Per-character settings (stored by character ID)
-2. **Model Locks** - Per-model settings (preset + template only, no profile)
-3. **Chat Locks** - Per-chat overrides
-4. **Group Locks** - Group chat settings
-5. **Individual Locks** - Individual character settings within groups (optional)
-
-#### Priority Resolution
-- **Locking Mode Toggle**: Character/Group mode OR Model mode
-- **3-way priority cascade**: Character/Group/Model vs Chat with bidirectional preferences
-- **Preference toggles**:
-  - Prefer chat over character/group
-  - Prefer chat over model
-  - Prefer individual character in group (for group chats)
-- **Independent item resolution**: Profile, Preset, and Template each resolve separately
+1. Character — Per-character settings (stored by character ID)
+2. Model — Per-model settings (preset + template only, no profile)
+3. Chat — Per-chat overrides
+4. Group — Group chat settings
+5. Individual — Individual character settings within groups (optional)
 
 #### Auto-Apply System
-- **Three modes**: Never / Ask / Always
-- **Context-aware**: Triggers on character/chat/group changes
-- **Race condition protection**: Validates context before applying
-- **Debounced queue**: Handles rapid context changes gracefully
+- Three modes: Never / Ask / Always
+- Context-aware: Triggers on character/chat/group changes
+- Race condition protection: Validates context before applying
+- Debounced queue: Handles rapid context changes gracefully
 
 #### User Interface
-- **Lock management popup**: Handlebars-based interface with CCPM + STCL styling
-- **Current locks display**: Shows active locks for all dimensions
-- **Persistent status indicator**: Shows active locks in extensions menu
-- **Preferences UI**: Checkboxes and radio buttons for all settings
-- **"Apply Now" button**: Manual lock application
+- Lock management popup (Handlebars-based)
+- Current locks display for all dimensions
+- Persistent status indicator
+- Preferences and Apply Now controls
 
 ### 🏗️ Architecture
 
-#### Section 1: Core Classes
-- `ChatContext` - Context detection for single/group chats
-- `StorageAdapter` - Unified storage for all lock types
-- `PriorityResolver` - Complex priority cascade logic
-
-#### Section 2: Locker Classes
-- `ProfileLocker` - Connection profile switching via `/profile`
-- `PresetLocker` - Generation preset switching via `/preset`
-- `TemplateLocker` - Template switching (stub for future CCPM integration)
-
-#### Section 3: SettingsManager
-- Main orchestrator coordinating all components
-- Critical application order: Profile → Preset → Template
-- Queue-based context change handling
-
-#### Section 4: Event Handlers
-- 7 event handlers for comprehensive ST integration
-- Persistent display updates
-- Individual character lock support in groups
-
-#### Section 5: UI & Popup Management
-- Handlebars templates
-- Lock management interface
-- Menu button injection
-
-#### Section 6: Initialization
-- APP_READY event handling
-- Component wiring
-- Fallback initialization
+- ChatContext / StorageAdapter / PriorityResolver
+- ProfileLocker (/profile), PresetLocker (/preset), TemplateLocker
+- SettingsManager orchestrates resolution and application
+- Event handlers for deep integration
+- APP_READY bootstrap
 
 ### 🔒 Security & Stability
 
-- **Race condition protection**: All apply methods validate context hasn't changed
-- **Error handling**: Comprehensive try-catch blocks throughout
-- **Debug mode**: Conditional logging for troubleshooting
-- **Graceful degradation**: Fallbacks for missing features
+- Context validation during async applies
+- Robust error handling
+- DEBUG mode logging
+- Graceful degradation
 
-### 📝 Key Decisions
+### Key Decisions
+- Critical application order: Profile → Preset → Template
+- Model dimension excludes Profile
+- Character storage by chId with name fallback
+- Explicit nulls allowed; empty names rejected
 
-- Single-file architecture (1,758 lines)
-- Multi-item lock structure: `{ profile, preset, template }`
-- Profile → Preset → Template application order (CRITICAL)
-- ChId-based character storage with name fallback
-- Profile locks excluded from model dimension
-- Chat Completion only (no Text Completion)
-- Explicit null values allowed (intentional unset)
-- Empty lock names rejected on save
-
-#### Save/Clear UI (v1.0.0 Complete)
-- **Set Character/Group** - Save current settings as character/group lock
-- **Set Chat** - Save current settings as chat lock
-- **Set Model** - Save current settings as model lock
-- **Clear buttons** - Clear locks for each dimension
-- **Context-aware buttons** - Different buttons for single/group chats
-- **Toastr notifications** - Success/error feedback
-- **Popup refresh** - Auto-refresh after save/clear
-
-### 🚀 Future Enhancements
-
-- [ ] Template manager lazy-loading integration
-- [ ] Migration from STCL/CCPM
-- [ ] Conflict resolution UI warnings
-- [ ] Export/Import lock configurations
-- [ ] Visual lock indicators in chat interface
-
----
-
-**Total Implementation**: 2,049 lines across 6 major sections
-**Development Time**: Single session (2025-10-02)
-**Status**: Ready for testing and deployment
+### Future Enhancements
+- Template manager lazy-loading
+- Migration helpers and conflict UI
+- Export/Import
+- Visual indicators in chat

@@ -238,18 +238,9 @@ export class CCPMMigration {
                 }
             }
 
-            // Migrate preferences
-            if (ccpmData.lockingMode !== undefined) {
-                stglStorage.updatePreference('lockingMode', ccpmData.lockingMode);
-            }
+            // Migrate preferences (locking mode and legacy chat preferences removed)
             if (ccpmData.autoApplyMode !== undefined) {
                 stglStorage.updatePreference('autoApplyOnContextChange', ccpmData.autoApplyMode);
-            }
-            if (ccpmData.preferPrimaryOverChat !== undefined) {
-                stglStorage.updatePreference('preferCharacterOverChat', ccpmData.preferPrimaryOverChat);
-            }
-            if (ccpmData.preferGroupOverChat !== undefined) {
-                stglStorage.updatePreference('preferGroupOverChat', ccpmData.preferGroupOverChat);
             }
             if (ccpmData.preferIndividualCharacterInGroup !== undefined) {
                 stglStorage.updatePreference('preferIndividualCharacterInGroup', ccpmData.preferIndividualCharacterInGroup);

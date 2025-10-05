@@ -40,10 +40,6 @@ const AUTO_APPLY_MODES = {
     ALWAYS: 'always'
 };
 
-const LOCKING_MODES = {
-    CHARACTER: 'character',
-    MODEL: 'model'
-};
 
 const LOCKABLE_ITEMS = {
     PROFILE: 'profile',
@@ -56,7 +52,6 @@ const DEFAULT_SETTINGS = {
         preferIndividualCharacterInGroup: true,
         showNotifications: true,
         autoApplyOnContextChange: AUTO_APPLY_MODES.ASK,
-        lockingMode: LOCKING_MODES.CHARACTER,
         // Priority order: first in array wins (highest priority)
         // Default: MODEL > CHAT > CHARACTER/GROUP
         priorityOrder: [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER]
@@ -225,64 +220,11 @@ class StorageAdapter {
 
         const settings = extension_settings[this.EXTENSION_KEY];
 
-        // Migration: Convert old checkbox preferences to priorityOrder array
-        if (!settings.moduleSettings.priorityOrder && (
-            settings.moduleSettings.preferChatOverCharacterOrGroup !== undefined ||
-            settings.moduleSettings.preferChatOverModel !== undefined
-        )) {
-            const {
-                lockingMode,
-                preferChatOverCharacterOrGroup,
-                preferChatOverModel
-            } = settings.moduleSettings;
-
-            // Determine primary source based on locking mode
-            const primary = lockingMode === LOCKING_MODES.CHARACTER
-                ? SETTING_SOURCES.CHARACTER
-                : SETTING_SOURCES.MODEL;
-
-            const loser = primary === SETTING_SOURCES.CHARACTER
-                ? SETTING_SOURCES.MODEL
-                : SETTING_SOURCES.CHARACTER;
-
-            // Build priority order based on old preferences
-            const priorityOrder = [];
-
-            if (primary === SETTING_SOURCES.CHARACTER) {
-                // Character mode
-                if (preferChatOverCharacterOrGroup && preferChatOverModel) {
-                    priorityOrder.push(SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL);
-                } else if (!preferChatOverCharacterOrGroup && preferChatOverModel) {
-                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL);
-                } else if (preferChatOverCharacterOrGroup && !preferChatOverModel) {
-                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER);
-                } else {
-                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT);
-                }
-            } else {
-                // Model mode
-                if (preferChatOverModel && preferChatOverCharacterOrGroup) {
-                    priorityOrder.push(SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL, SETTING_SOURCES.CHARACTER);
-                } else if (!preferChatOverModel && preferChatOverCharacterOrGroup) {
-                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER);
-                } else if (preferChatOverModel && !preferChatOverCharacterOrGroup) {
-                    priorityOrder.push(SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT, SETTING_SOURCES.MODEL);
-                } else {
-                    priorityOrder.push(SETTING_SOURCES.MODEL, SETTING_SOURCES.CHARACTER, SETTING_SOURCES.CHAT);
-                }
-            }
-
-            settings.moduleSettings.priorityOrder = priorityOrder;
-
-            // Clean up old preferences
+        // Cleanup deprecated preferences (alpha)
+        if (settings.moduleSettings) {
+            delete settings.moduleSettings.lockingMode;
             delete settings.moduleSettings.preferChatOverCharacterOrGroup;
             delete settings.moduleSettings.preferChatOverModel;
-
-            this.saveExtensionSettings();
-
-            if (DEBUG_MODE) {
-                console.log('STGL: Migrated old checkbox preferences to priorityOrder:', priorityOrder);
-            }
         }
 
         return settings;
@@ -590,7 +532,6 @@ class PriorityResolver {
      */
     _buildCascade(context, preferences) {
         const {
-            lockingMode,
             preferIndividualCharacterInGroup,
             priorityOrder
         } = preferences;
@@ -605,18 +546,12 @@ class PriorityResolver {
         const cascade = [];
 
         for (const source of order) {
-            // Map CHARACTER to GROUP in group chats when in character mode
             if (source === SETTING_SOURCES.CHARACTER) {
-                const effectiveSource = isGroupChat && lockingMode === LOCKING_MODES.CHARACTER
-                    ? SETTING_SOURCES.GROUP
-                    : SETTING_SOURCES.CHARACTER;
-
-                // Inject INDIVIDUAL before GROUP if preference enabled
-                if (effectiveSource === SETTING_SOURCES.GROUP && preferIndividualCharacterInGroup) {
-                    cascade.push(SETTING_SOURCES.INDIVIDUAL);
+                if (isGroupChat) {
+                    cascade.push(SETTING_SOURCES.GROUP);
+                } else {
+                    cascade.push(SETTING_SOURCES.CHARACTER);
                 }
-
-                cascade.push(effectiveSource);
             } else {
                 cascade.push(source);
             }
@@ -1438,7 +1373,7 @@ if (resolved.locks.template) {
 }
 // Human-readable sources (Character becomes Group in group chats for labeling)
 const isGroupChatAuto = context.isGroupChat;
-const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChatAuto ? 'Group' : 'Character', group: 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
+const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChatAuto ? 'Character/Group' : 'Character', group: isGroupChatAuto ? 'Character/Group' : 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
 const profileSource = resolved.sources?.profile ? toTitleCase(resolved.sources.profile) : null;
 const presetSource = resolved.sources?.preset ? toTitleCase(resolved.sources.preset) : null;
 const templateSource = resolved.sources?.template ? toTitleCase(resolved.sources.template) : null;
@@ -1651,9 +1586,30 @@ async function onGroupMemberDrafted(chId) {
 
         if (DEBUG_MODE) console.log(`STGL: Applying individual locks for character ${chId}:`, individualLock);
 
-        // Apply individual locks directly (bypass priority resolver)
+        // Respect priority order: overlay individual ONLY over Group at the Character/Group position
         const originalContextId = chatContext.primaryId;
-        await settingsManager._applyLocksToUI(individualLock, originalContextId);
+
+        // Resolve current winners first
+        const resolved = settingsManager.priorityResolver.resolve(chatContext, preferences);
+
+        // Build merged locks where individual only overrides items whose winner is Group
+        const mergedLocks = {
+            profile: resolved.locks.profile,
+            preset: resolved.locks.preset,
+            template: resolved.locks.template,
+        };
+
+        const items = [LOCKABLE_ITEMS.PROFILE, LOCKABLE_ITEMS.PRESET, LOCKABLE_ITEMS.TEMPLATE];
+        for (const item of items) {
+            const winner = resolved.sources[item];
+            const value = individualLock[item];
+            const isValueSet = value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0);
+            if (winner === SETTING_SOURCES.GROUP && isValueSet) {
+                mergedLocks[item] = value;
+            }
+        }
+
+        await settingsManager._applyLocksToUI(mergedLocks, originalContextId);
 
         updateDisplay();
     } catch (error) {
@@ -1696,11 +1652,13 @@ async function onPresetChanged() {
             if (!promptsMatchTemplate) {
                 const templateObj = settingsManager.storage.getTemplate(resolved.locks.template);
                 const templateName = templateObj ? templateObj.name : resolved.locks.template;
-                const sourceName = resolved.sources?.template || 'unknown';
+                const isGroupChat = context.isGroupChat;
+                const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Character/Group' : 'Character', group: isGroupChat ? 'Character/Group' : 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
+                const sourceLabel = resolved.sources?.template ? toTitleCase(resolved.sources.template) : 'unknown';
 
                 const message = `The preset you selected may have changed your completion template.<br><br>` +
                     `Do you want to restore the locked template?<br><br>` +
-                    `<b>${templateName}</b> <small class="text_muted">(locked from ${sourceName})</small>`;
+                    `<b>${templateName}</b> <small class="text_muted">(locked from ${sourceLabel})</small>`;
 
                 const result = await callGenericPopup(
                     message,
@@ -1746,7 +1704,7 @@ function updateDisplay() {
         const { locks, sources } = settingsManager.getCurrentLocks();
         const context = settingsManager.chatContext.getCurrent();
         const isGroupChat = context.isGroupChat;
-        const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Group' : 'Character', group: 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
+        const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Character/Group' : 'Character', group: isGroupChat ? 'Character/Group' : 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
 
         // Remove existing display
         const existing = document.getElementById('stgl-status-indicator');
@@ -1804,10 +1762,21 @@ function updateDisplay() {
             html = '<span class="fa-solid fa-circle-info"></span> No generation locks applied for this context.';
         }
 
+        // Append inline indicator for Individual-over-Group when enabled in group chats
+        try {
+            const prefs = settingsManager.storage.getPreferences ? settingsManager.storage.getPreferences() : {};
+            if (isGroupChat && prefs.preferIndividualCharacterInGroup) {
+                const tip = 'Individual character overrides are enabled. In group chats, saved settings for the drafted character may override Group settings only.';
+                html += ` <i class="fa-solid fa-user-lock" title="${tip}"></i>`;
+            }
+        } catch (e) {
+            if (DEBUG_MODE) console.warn('STGL: Tooltip append failed:', e);
+        }
+
         // Create and inject indicator
         const indicator = document.createElement('div');
         indicator.id = 'stgl-status-indicator';
-        indicator.className = 'stgl-status-indicator';
+        indicator.className = 'text_pole padding10 marginTop5';
         indicator.innerHTML = `<small class="text_muted">${html}</small>`;
 
         // Insert before the prompt list, inside the prompt manager UI.
@@ -1868,96 +1837,103 @@ let currentPopupInstance = null;
  * Handlebars template for lock management popup
  */
 const lockManagementTemplate = Handlebars.compile(`
-<div class="completion_prompt_manager_popup_entry">
-    <div class="completion_prompt_manager_error {{#unless isExtensionEnabled}}caution{{/unless}} marginBot10">
-        <span>Status: <strong>{{statusText}}</strong></span>
-    </div>
+<div class="completion_prompt_manager_error {{#unless isExtensionEnabled}}caution{{/unless}} marginBot10">
+    <span>Status: <strong>{{statusText}}</strong></span>
+</div>
 
-    <div class="completion_prompt_manager_popup_entry_form_control">
-        {{#each checkboxes}}
-        <label class="checkbox_label">
-            <input type="checkbox" id="{{id}}" {{#if checked}}checked{{/if}}>
+<div class="completion_prompt_manager_popup_entry_form_control">
+    {{#each checkboxes}}
+    <label class="checkbox_label">
+        <input type="checkbox" id="{{id}}" {{#if checked}}checked{{/if}}>
+        <span>{{label}}</span>
+    </label>
+    {{/each}}
+</div>
+
+<div class="completion_prompt_manager_popup_entry_form_control">
+    <h4 class="standoutHeader">📊 Priority Order:</h4>
+    <div id="stgl-priority-dropdowns" class="marginTop10 flex-container flexFlowColumn flexGap10">
+        <div class="flex-container flexGap10 alignitemscenter">
+            <label style="min-width:120px;">1st (highest):</label>
+            <select id="stgl-priority-select-1" class="text_pole">
+                {{#each priorityOptions1}}
+                <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+                {{/each}}
+            </select>
+        </div>
+        <div class="flex-container flexGap10 alignitemscenter">
+            <label style="min-width:120px;">2nd:</label>
+            <select id="stgl-priority-select-2" class="text_pole">
+                {{#each priorityOptions2}}
+                <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+                {{/each}}
+            </select>
+        </div>
+        <div class="flex-container flexGap10 alignitemscenter">
+            <label style="min-width:120px;">3rd (lowest):</label>
+            <select id="stgl-priority-select-3" class="text_pole">
+                {{#each priorityOptions3}}
+                <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+                {{/each}}
+            </select>
+        </div>
+    </div>
+</div>
+
+<div class="completion_prompt_manager_popup_entry_form_control">
+    <label class="checkbox_label">
+        <input type="checkbox" id="stgl-prefer-individual" {{#if preferIndividualCharacterInGroup}}checked{{/if}}>
+        <span>In group chats, always prefer individual character settings over group settings</span>
+    </label>
+</div>
+
+<div class="completion_prompt_manager_popup_entry_form_control">
+    <h4 class="standoutHeader">⚙️ Auto-apply Mode:</h4>
+    <div class="marginTop10">
+        {{#each autoApplyOptions}}
+        <label class="radio_label">
+            <input type="radio" name="stgl-auto-apply-mode" value="{{value}}" {{#if checked}}checked{{/if}}>
             <span>{{label}}</span>
         </label>
         {{/each}}
     </div>
-
-    <div class="completion_prompt_manager_popup_entry_form_control">
-        <h4 class="standoutHeader">📊 Priority Order:</h4>
-        <div class="marginTop10">
-            <small class="text_muted">Type 1 (highest) to 3 (lowest). Boxes will reorder automatically.</small>
-            <div id="stgl-priority-boxes" class="marginTop10">
-                {{#each priorityBoxes}}
-                <div class="completion_prompt_manager_prompt stgl-priority-box" data-source="{{source}}">
-                    <div class="flex-container flexGap10 alignitemscenter">
-                        <label style="min-width: 120px;">{{label}}</label>
-                        <input type="number" class="stgl-priority-input" data-source="{{source}}" min="1" max="3" value="{{number}}">
-                    </div>
-                </div>
-                {{/each}}
-            </div>
-        </div>
-    </div>
-
-    <div class="completion_prompt_manager_popup_entry_form_control">
-        <h4 class="standoutHeader">⚙️ Auto-apply Mode:</h4>
-        <div class="marginTop10">
-            {{#each autoApplyOptions}}
-            <label class="radio_label">
-                <input type="radio" name="stgl-auto-apply-mode" value="{{value}}" {{#if checked}}checked{{/if}}>
-                <span>{{label}}</span>
-            </label>
-            {{/each}}
-        </div>
-    </div>
-
-    <div class="completion_prompt_manager_popup_entry_form_control">
-        <h4 class="standoutHeader">🔒 Locking Mode:</h4>
-        <div class="marginTop10">
-            {{#each lockingModeOptions}}
-            <label class="radio_label">
-                <input type="radio" name="stgl-locking-mode" value="{{value}}" {{#if checked}}checked{{/if}}>
-                <span>{{label}}</span>
-            </label>
-            {{/each}}
-        </div>
-    </div>
-
-    {{#if hasActiveChat}}
-    <div class="completion_prompt_manager_popup_entry_form_control">
-        <h4 class="standoutHeader">📍 Current Locks:</h4>
-        <div class="marginTop10 flex-container flexFlowColumn flexGap10">
-            {{#if isGroupChat}}
-                {{#if groupLocks}}
-                <div class="text_pole padding10">
-                    <strong>Group:</strong> {{groupName}}<br>
-                    {{groupLocks}}
-                </div>
-                {{/if}}
-            {{else}}
-                {{#if characterLocks}}
-                <div class="text_pole padding10">
-                    <strong>Character:</strong> {{characterName}}<br>
-                    {{characterLocks}}
-                </div>
-                {{/if}}
-            {{/if}}
-            {{#if chatLocks}}
-            <div class="text_pole padding10">
-                <strong>Chat Locks:</strong><br>
-                {{chatLocks}}
-            </div>
-            {{/if}}
-            {{#if modelLocks}}
-            <div class="text_pole padding10">
-                <strong>Model:</strong> {{modelName}}<br>
-                {{modelLocks}}
-            </div>
-            {{/if}}
-        </div>
-    </div>
-    {{/if}}
 </div>
+
+
+{{#if hasActiveChat}}
+<div class="completion_prompt_manager_popup_entry_form_control">
+    <h4 class="standoutHeader">📍 Current Locks:</h4>
+    <div class="marginTop10 flex-container flexFlowColumn flexGap10">
+        {{#if isGroupChat}}
+            {{#if groupLocks}}
+            <div class="text_pole padding10">
+                <strong>Group:</strong> {{groupName}}<br>
+                {{groupLocks}}
+            </div>
+            {{/if}}
+        {{else}}
+            {{#if characterLocks}}
+            <div class="text_pole padding10">
+                <strong>Character:</strong> {{characterName}}<br>
+                {{characterLocks}}
+            </div>
+            {{/if}}
+        {{/if}}
+        {{#if chatLocks}}
+        <div class="text_pole padding10">
+            <strong>Chat Locks:</strong><br>
+            {{chatLocks}}
+        </div>
+        {{/if}}
+        {{#if modelLocks}}
+        <div class="text_pole padding10">
+            <strong>Model:</strong> {{modelName}}<br>
+            {{modelLocks}}
+        </div>
+        {{/if}}
+    </div>
+</div>
+{{/if}}
 `);
 
 /**
@@ -1997,33 +1973,36 @@ async function getPopupContent() {
     const stContext = getContext();
     const hasActiveChat = !!(stContext?.chatId);
 
-    // Build checkboxes based on context
-    const checkboxes = isGroupChat ? [
-        { id: 'stgl-prefer-individual', label: 'Prefer individual character in group', checked: preferences.preferIndividualCharacterInGroup },
-        { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
-    ] : [
+    // Build checkboxes (notifications only; prefer-individual rendered separately)
+    const checkboxes = [
         { id: 'stgl-show-notifications', label: 'Show notifications', checked: preferences.showNotifications }
     ];
 
-    // Priority order - map sources to labels
+    // Priority order - cascading dropdown options
     const sourceLabels = {
+        [SETTING_SOURCES.MODEL]: '🤖 Model',
         [SETTING_SOURCES.CHAT]: '💬 Chat',
-        [SETTING_SOURCES.CHARACTER]: isGroupChat ? '👥 Group' : '👤 Character',
-        [SETTING_SOURCES.MODEL]: '🤖 Model'
+        [SETTING_SOURCES.CHARACTER]: '👤 Character/Group'
     };
 
     const order = Array.isArray(preferences.priorityOrder) && preferences.priorityOrder.length
         ? preferences.priorityOrder
         : [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER];
 
-    const numMap = {};
-    order.forEach((s, idx) => { numMap[s] = idx + 1; });
+    const allSources = [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER];
 
-    const priorityBoxes = [
-        { source: SETTING_SOURCES.MODEL, label: sourceLabels[SETTING_SOURCES.MODEL] || 'Model', number: numMap[SETTING_SOURCES.MODEL] || 3 },
-        { source: SETTING_SOURCES.CHAT, label: sourceLabels[SETTING_SOURCES.CHAT] || 'Chat', number: numMap[SETTING_SOURCES.CHAT] || 2 },
-        { source: SETTING_SOURCES.CHARACTER, label: sourceLabels[SETTING_SOURCES.CHARACTER] || (isGroupChat ? 'Group' : 'Character'), number: numMap[SETTING_SOURCES.CHARACTER] || 3 },
-    ].sort((a, b) => a.number - b.number);
+    // Cascading disabled: all selects show the same set; uniqueness enforced on save
+    const makeOptionsAll = (selected) => {
+        return allSources.map(s => ({ value: s, label: sourceLabels[s], selected: s === selected }));
+    };
+
+    const sel1 = order[0] || SETTING_SOURCES.MODEL;
+    const sel2 = order[1] || SETTING_SOURCES.CHAT;
+    const sel3 = order[2] || SETTING_SOURCES.CHARACTER;
+
+    const priorityOptions1 = makeOptionsAll(sel1);
+    const priorityOptions2 = makeOptionsAll(sel2);
+    const priorityOptions3 = makeOptionsAll(sel3);
 
     // Auto-apply options
     const autoApplyOptions = [
@@ -2032,11 +2011,6 @@ async function getPopupContent() {
         { value: AUTO_APPLY_MODES.ALWAYS, label: 'Always auto-apply', checked: preferences.autoApplyOnContextChange === AUTO_APPLY_MODES.ALWAYS }
     ];
 
-    // Locking mode options
-    const lockingModeOptions = [
-        { value: LOCKING_MODES.CHARACTER, label: 'Character/Group mode', checked: preferences.lockingMode === LOCKING_MODES.CHARACTER },
-        { value: LOCKING_MODES.MODEL, label: 'Model mode', checked: preferences.lockingMode === LOCKING_MODES.MODEL }
-    ];
 
     // Get current locks
     const chIndex = !isGroupChat && context.characterName && Array.isArray(characters) ? characters.findIndex(x => x.name === context.characterName) : -1;
@@ -2054,9 +2028,11 @@ async function getPopupContent() {
         groupName: context.groupName,
         modelName: context.modelName,
         checkboxes,
-        priorityBoxes,
+        priorityOptions1,
+        priorityOptions2,
+        priorityOptions3,
+        preferIndividualCharacterInGroup: preferences.preferIndividualCharacterInGroup,
         autoApplyOptions,
-        lockingModeOptions,
         characterLocks: formatLockInfo(characterLocks),
         groupLocks: formatLockInfo(groupLocks),
         chatLocks: formatLockInfo(chatLocks),
@@ -2081,55 +2057,11 @@ async function refreshPopupAfterSave() {
 
 
 /**
- * Initialize numeric priority inputs and live reordering
+ * Initialize cascading priority dropdowns
  */
-function initializePriorityInputs() {
-    try {
-        const root = currentPopupInstance?.dlg || document;
-        const container = root.querySelector('#stgl-priority-boxes');
-        if (!container) return;
-
-        const clamp = (value) => {
-            const n = parseInt(String(value || '').trim(), 10);
-            if (isNaN(n)) return 3;
-            return Math.min(3, Math.max(1, n));
-        };
-
-        const readEntries = () => {
-            const boxes = Array.from(container.querySelectorAll('.stgl-priority-box'));
-            return boxes.map(box => {
-                const source = box.getAttribute('data-source');
-                const input = box.querySelector('.stgl-priority-input');
-                const number = clamp(input?.value);
-                return { box, source, number, input };
-            });
-        };
-
-        const renderOrder = () => {
-            const entries = readEntries().sort((a, b) => a.number - b.number);
-            entries.forEach(e => container.appendChild(e.box));
-        };
-
-        container.addEventListener('input', (e) => {
-            const target = e.target;
-            if (target && target.classList && target.classList.contains('stgl-priority-input')) {
-                target.value = clamp(target.value);
-                renderOrder();
-            }
-        });
-
-        container.addEventListener('change', (e) => {
-            const target = e.target;
-            if (target && target.classList && target.classList.contains('stgl-priority-input')) {
-                target.value = clamp(target.value);
-                renderOrder();
-            }
-        });
-
-        renderOrder();
-    } catch (e) {
-        if (DEBUG_MODE) console.warn('STGL: Failed to initialize priority numeric inputs:', e);
-    }
+function initializePriorityDropdowns() {
+    // Cascading disabled; uniqueness is enforced on save
+    return;
 }
 
 /**
@@ -2151,7 +2083,27 @@ async function showLockManagementPopup() {
     const stContext = getContext();
     const hasActiveChat = !!(stContext?.chatId);
 
-    const customButtons = [];
+const customButtons = [];
+// Save preferences explicitly (refuses duplicates, keeps dialog open)
+customButtons.push({
+    text: '💾 Save',
+    classes: ['menu_button'],
+    action: async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+            const root = currentPopupInstance?.dlg;
+            const ok = await savePreferencesFromPopup(root);
+            if (ok) {
+                try { toastr.success('Preferences saved'); } catch (e) {}
+                updateDisplay();
+            }
+        } catch (e) {
+            console.error('STGL: Error saving preferences:', e);
+            try { toastr.error('Failed to save preferences'); } catch (_e) {}
+        }
+    }
+});
 
     // Add save/clear buttons if there's an active chat
     if (hasActiveChat && settingsManager) {
@@ -2344,8 +2296,16 @@ async function showLockManagementPopup() {
         currentPopupInstance = new Popup(contentWithHeader, POPUP_TYPE.TEXT, '', popupOptions);
         await currentPopupInstance.show();
 
-        // Initialize numeric inputs + live reordering after popup is rendered
-        initializePriorityInputs();
+        // Initialize cascading priority dropdowns after popup is rendered
+        initializePriorityDropdowns();
+
+        // Ensure popup buttons can wrap onto a second row using ST utility classes (no custom CSS)
+        try {
+            const btnContainer = currentPopupInstance?.dlg?.querySelector?.('.popup-controls');
+            if (btnContainer) {
+                btnContainer.classList.add('flexWrap', 'justifyCenter');
+            }
+        } catch (e) {}
     } catch (error) {
         console.error('STGL: Error showing popup:', error);
         currentPopupInstance = null;
@@ -2353,11 +2313,10 @@ async function showLockManagementPopup() {
 }
 
 /**
- * Handle popup close - save preferences
+ * Save preferences from popup (explicit save button)
  */
-async function handlePopupClose(popup) {
+async function savePreferencesFromPopup(popupElement) {
     try {
-        const popupElement = popup.dlg;
         const storage = new StorageAdapter();
 
         // Save checkbox preferences
@@ -2373,17 +2332,23 @@ async function handlePopupClose(popup) {
             }
         }
 
-        // Save priority order from numeric inputs
-        const inputs = popupElement.querySelectorAll('.stgl-priority-input');
-        if (inputs && inputs.length) {
-            const entries = Array.from(inputs).map(inp => ({
-                source: inp.getAttribute('data-source'),
-                number: Math.max(1, Math.min(3, parseInt(inp.value || '0', 10) || 3))
-            }));
-            entries.sort((a, b) => a.number - b.number);
-            const priorityOrder = entries.map(e => e.source);
-            storage.updatePreference('priorityOrder', priorityOrder);
-            if (DEBUG_MODE) console.log('STGL: Priority order saved (numeric):', priorityOrder);
+        // Save priority order (refuse duplicates)
+        const s1 = popupElement.querySelector('#stgl-priority-select-1');
+        const s2 = popupElement.querySelector('#stgl-priority-select-2');
+        const s3 = popupElement.querySelector('#stgl-priority-select-3');
+        if (s1 && s2 && s3) {
+            const all = ['model', 'chat', 'character'];
+            const seq = [s1.value, s2.value, s3.value].filter(v => all.includes(v));
+            const isValid = seq.length === 3 && new Set(seq).size === 3;
+            if (!isValid) {
+                try {
+                    toastr.error('Priority order must be unique (Model, Chat, Character/Group). Please adjust and try again.');
+                } catch (e) {}
+                if (DEBUG_MODE) console.warn('STGL: Refused to save invalid/duplicate priority order:', seq);
+                return false;
+            } else {
+                storage.updatePreference('priorityOrder', seq);
+            }
         }
 
         // Save auto-apply mode
@@ -2392,15 +2357,20 @@ async function handlePopupClose(popup) {
             storage.updatePreference('autoApplyOnContextChange', autoApplyRadio.value);
         }
 
-        // Save locking mode
-        const lockingModeRadio = popupElement.querySelector('input[name="stgl-locking-mode"]:checked');
-        if (lockingModeRadio) {
-            storage.updatePreference('lockingMode', lockingModeRadio.value);
-        }
-
-        if (DEBUG_MODE) console.log('STGL: Preferences saved');
+        if (DEBUG_MODE) console.log('STGL: Preferences saved (explicit)');
+        return true;
     } catch (error) {
         console.error('STGL: Error saving preferences:', error);
+        return false;
+    }
+}
+
+/**
+ * Handle popup close - do not save (explicit close)
+ */
+async function handlePopupClose(popup) {
+    try {
+        // No-op: do not save on close
     } finally {
         currentPopupInstance = null;
     }
