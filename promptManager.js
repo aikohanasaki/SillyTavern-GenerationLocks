@@ -9,6 +9,36 @@ import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popu
 let mainPopup = null;
 
 /**
+ * Ensure our popups sit above other overlays by bumping z-index and moving host to end of body.
+ * Works without touching core CSS by locating the nearest dialog/popup wrapper for our content.
+ */
+let STGL_POPUP_Z = 10050;
+function elevatePopupHostForTop(contentNode) {
+    try {
+        const el = contentNode && contentNode.nodeType ? contentNode : null;
+        if (!el || !el.closest) return;
+        const dlg = el.closest('dialog.popup, dialog, .popup, [role="dialog"]');
+        if (!dlg) return;
+
+        // Monotonic z-index so each new popup stacks above previous ones
+        STGL_POPUP_Z = (window.__STGL_POPUP_Z || STGL_POPUP_Z || 10050) + 1;
+        window.__STGL_POPUP_Z = STGL_POPUP_Z;
+
+        dlg.style.zIndex = String(STGL_POPUP_Z);
+        if (!dlg.style.position) {
+            dlg.style.position = 'relative';
+        }
+
+        // Re-append to body to ensure it is the last child (DOM order)
+        if (dlg.parentNode) {
+            document.body.appendChild(dlg);
+        }
+    } catch (e) {
+        console.debug('STGL elevatePopupHostForTop failed:', e);
+    }
+}
+
+/**
  * Inject the Prompt Template Manager button into extensions menu
  */
 export function injectPromptTemplateManagerButton() {
@@ -68,6 +98,7 @@ export function openPromptTemplateManager() {
         large: true,
         allowVerticalScrolling: true,
         onOpen: () => {
+            elevatePopupHostForTop(content);
             renderTemplateList();
             setupTemplateManagerEvents();
         },
@@ -228,6 +259,7 @@ async function showCreateTemplateDialog() {
         cancelButton: 'Cancel',
         allowVerticalScrolling: true,
         onOpen: () => {
+            elevatePopupHostForTop(content);
             // Setup select/unselect all buttons
             document.getElementById('stgl-select-all')?.addEventListener('click', () => {
                 document.querySelectorAll('input[name="stgl-prompts"]').forEach(cb => cb.checked = true);
@@ -302,7 +334,10 @@ window.stglEditTemplate = async function(id) {
 
     const popup = new Popup(content, POPUP_TYPE.CONFIRM, '', {
         okButton: 'Save',
-        cancelButton: 'Cancel'
+        cancelButton: 'Cancel',
+        onOpen: () => {
+            elevatePopupHostForTop(content);
+        }
     });
 
     const result = await popup.show();
@@ -352,7 +387,10 @@ window.stglDeleteTemplate = async function(id) {
 
     const result = await callGenericPopup(content, POPUP_TYPE.CONFIRM, '', {
         okButton: 'Delete',
-        cancelButton: 'Cancel'
+        cancelButton: 'Cancel',
+        onOpen: () => {
+            elevatePopupHostForTop(content);
+        }
     });
 
     if (result === POPUP_RESULT.AFFIRMATIVE) {
@@ -419,11 +457,6 @@ window.stglViewPrompts = async function(templateId) {
             ${template.description ? `<div class="text_muted">${escapeHtml(template.description)}</div>` : ''}
 
             <ul id="stgl-prompt-order-list" class="text_pole ui-sortable">
-                <li class="flex-container alignItemsCenter justifySpaceBetween">
-                    <span>Name</span>
-                    <span>Role</span>
-                </li>
-                <li class="marginBot5"><hr></li>
                 ${orderedPrompts.map(prompt => {
                     const isMarker = prompt.marker;
                     const isSystemPrompt = prompt.system_prompt;
@@ -495,18 +528,27 @@ window.stglViewPrompts = async function(templateId) {
         large: true,
         allowVerticalScrolling: true,
         onOpen: () => {
-            // Initialize collapsed state without inline styles
-            document.querySelectorAll('.stgl_prompt_drawer .inline-drawer-content').forEach(el => { el.style.display = 'none'; });
-            document.querySelectorAll('.stgl_prompt_edit_drawer').forEach(el => { el.style.display = 'none'; });
+            elevatePopupHostForTop(content);
+            // Collapse drawers using existing utility classes (no inline styles)
+            document.querySelectorAll('.stgl_prompt_drawer').forEach(li => li.classList.add('displayNone'));
+            document.querySelectorAll('.stgl_prompt_drawer .inline-drawer-content').forEach(el => el.classList.remove('displayBlock'));
+            document.querySelectorAll('.stgl_prompt_edit_drawer').forEach(li => li.classList.add('displayNone'));
             // Setup click handlers for expanding/collapsing prompts
             document.querySelectorAll('.stgl-expand-prompt').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
                     const identifier = link.dataset.identifier;
-                    const drawerContent = document.querySelector(`.stgl_prompt_drawer[data-identifier="${identifier}"] .inline-drawer-content`);
-                    if (drawerContent) {
-                        const isVisible = drawerContent.style.display !== 'none';
-                        drawerContent.style.display = isVisible ? 'none' : 'block';
+                    const drawerLi = document.querySelector(`.stgl_prompt_drawer[data-identifier="${identifier}"]`);
+                    const drawerContent = drawerLi?.querySelector('.inline-drawer-content');
+                    if (drawerLi && drawerContent) {
+                        const isHidden = drawerLi.classList.contains('displayNone');
+                        if (isHidden) {
+                            drawerLi.classList.remove('displayNone');
+                            drawerContent.classList.add('displayBlock');
+                        } else {
+                            drawerContent.classList.remove('displayBlock');
+                            drawerLi.classList.add('displayNone');
+                        }
                     }
                 });
             });
@@ -517,7 +559,7 @@ window.stglViewPrompts = async function(templateId) {
                     e.preventDefault();
                     e.stopPropagation();
                     const identifier = btn.dataset.identifier;
-                    stglOpenEditDrawer(templateId, identifier);
+                    stglHandleEditClick(templateId, identifier);
                 });
             });
 
@@ -686,6 +728,346 @@ async function stglOpenEditDrawer(templateId, promptIdentifier) {
 }
 
 /**
+ * Handle edit click with fallback when master form is unavailable
+ */
+function stglHandleEditClick(templateId, promptIdentifier) {
+    const masterForm = document.getElementById('completion_prompt_manager_popup_edit');
+    if (masterForm) {
+        stglOpenFullEditor(templateId, promptIdentifier);
+    } else {
+        stglOpenEditPopup(templateId, promptIdentifier);
+    }
+}
+
+/**
+ * Open ST's Prompt Manager drawer and prefill the full edit form
+ * Keeps ST look-and-feel by toggling the main drawer-content with "openDrawer"
+ * and activating the "edit" section. Adds a "Save to Template" control row.
+ */
+function stglOpenInSTDrawer(templateId, promptIdentifier) {
+    const template = window.promptTemplateManager.getTemplate(templateId);
+    const prompt = template?.prompts?.[promptIdentifier];
+    if (!template || !prompt) {
+        toastr.error('Prompt not found in template.');
+        return;
+    }
+
+    /** @type {HTMLElement|null} */
+    const drawer = document.getElementById('completion_prompt_manager_popup');
+    /** @type {HTMLElement|null} */
+    const editSection = document.getElementById('completion_prompt_manager_popup_edit');
+
+    if (!drawer || !editSection) {
+        // If the ST drawer or form isn't available for some reason, fall back to working editors
+        if (editSection) {
+            stglOpenEditDrawer(templateId, promptIdentifier);
+        } else {
+            stglOpenEditPopup(templateId, promptIdentifier);
+        }
+        return;
+    }
+
+    // Show the ST drawer in the standard way (no inline CSS)
+    drawer.classList.add('openDrawer');
+    drawer.classList.remove('displayNone');
+
+    // Hide other PM sections if they exist; show Edit section
+    ['completion_prompt_manager_popup_chathistory_edit',
+     'completion_prompt_manager_popup_dialogueexamples_edit',
+     'completion_prompt_manager_popup_inspect'
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('displayNone');
+    });
+    editSection.classList.remove('displayNone');
+
+    // Prefill the master edit form with our prompt values
+    const nameField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_name');
+    const roleField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_role');
+    const promptField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_prompt');
+    const injectionPositionField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
+    const injectionDepthField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
+    const injectionOrderField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
+    const injectionTriggerField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
+    const depthBlock = editSection.querySelector('#completion_prompt_manager_depth_block');
+    const orderBlock = editSection.querySelector('#completion_prompt_manager_order_block');
+    const forbidOverridesField = editSection.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
+
+    if (nameField) nameField.value = prompt.name || '';
+    if (roleField) roleField.value = prompt.role || 'system';
+    if (promptField) promptField.value = prompt.content || '';
+
+    if (injectionPositionField) injectionPositionField.value = String(prompt.injection_position ?? 0);
+    if (injectionDepthField) injectionDepthField.value = String(prompt.injection_depth ?? 4);
+    if (injectionOrderField) injectionOrderField.value = String(prompt.injection_order ?? 100);
+
+    if (injectionTriggerField) {
+        Array.from(injectionTriggerField.options).forEach(option => {
+            option.selected = Array.isArray(prompt.injection_trigger) && prompt.injection_trigger.includes(option.value);
+        });
+    }
+
+    // Show/hide depth/order blocks based on injection position
+    if (depthBlock && orderBlock && injectionPositionField) {
+        const showFields = injectionPositionField.value === '1';
+        depthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+        orderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+        injectionPositionField.addEventListener('change', (e) => {
+            const show = e.target.value === '1';
+            depthBlock.style.visibility = show ? 'visible' : 'hidden';
+            orderBlock.style.visibility = show ? 'visible' : 'hidden';
+        });
+    }
+
+    if (forbidOverridesField) {
+        // @ts-ignore
+        forbidOverridesField.checked = !!(prompt.forbid_overrides ?? false);
+    }
+
+    // Ensure only a single control row exists at a time
+    const existingControls = editSection.querySelector('#stgl-stdrawer-controls');
+    if (existingControls) existingControls.remove();
+
+    // Add "Save to Template" and "Cancel" controls using existing classes
+    const controls = document.createElement('div');
+    controls.id = 'stgl-stdrawer-controls';
+    controls.className = 'buttons_block'; // existing flex row styling
+    controls.innerHTML = `
+        <div id="stgl-stdrawer-save" class="menu_button">Save to Template</div>
+        <div id="stgl-stdrawer-cancel" class="menu_button">Cancel</div>
+    `;
+    editSection.appendChild(controls);
+
+    // Wire up controls
+    controls.querySelector('#stgl-stdrawer-cancel')?.addEventListener('click', () => {
+        controls.remove();
+        // Leave the ST drawer open; user can close it normally
+    });
+
+    controls.querySelector('#stgl-stdrawer-save')?.addEventListener('click', () => {
+        const savedData = {
+            name: /** @type {HTMLInputElement} */(editSection.querySelector('#completion_prompt_manager_popup_entry_form_name'))?.value ?? prompt.name,
+            role: /** @type {HTMLSelectElement} */(editSection.querySelector('#completion_prompt_manager_popup_entry_form_role'))?.value ?? prompt.role,
+            content: /** @type {HTMLTextAreaElement} */(editSection.querySelector('#completion_prompt_manager_popup_entry_form_prompt'))?.value ?? prompt.content,
+            injection_position: injectionPositionField ? Number(injectionPositionField.value) : prompt.injection_position,
+            injection_depth: injectionDepthField ? Number(injectionDepthField.value) : prompt.injection_depth,
+            injection_order: injectionOrderField ? Number(injectionOrderField.value) : prompt.injection_order,
+            injection_trigger: injectionTriggerField ? Array.from(injectionTriggerField.selectedOptions).map(opt => opt.value) : prompt.injection_trigger,
+            forbid_overrides: /** @type {HTMLInputElement} */(forbidOverridesField)?.checked ?? prompt.forbid_overrides,
+        };
+
+        Object.assign(template.prompts[promptIdentifier], savedData);
+
+        if (window.promptTemplateManager?.saveTemplate) {
+            window.promptTemplateManager.saveTemplate(template);
+        } else if (window.promptTemplateManager?.updateTemplate) {
+            window.promptTemplateManager.updateTemplate(template.id, { prompts: template.prompts });
+        }
+
+        toastr.success('Prompt updated in template');
+        window.stglViewPrompts(templateId);
+        controls.remove();
+    });
+}
+
+/**
+ * Open a full-screen style editor using ST drawer look & feel (drawer-content openDrawer).
+ * Reuses the Prompt Manager master form (#completion_prompt_manager_popup_edit) for full field coverage.
+ */
+async function stglOpenFullEditor(templateId, promptIdentifier) {
+    const template = window.promptTemplateManager.getTemplate(templateId);
+    const prompt = template?.prompts[promptIdentifier];
+    const masterForm = document.getElementById('completion_prompt_manager_popup_edit');
+
+    if (!template || !prompt) {
+        toastr.error('Prompt not found in template.');
+        return;
+    }
+
+    if (!masterForm) {
+        // Fallback if master form is not present
+        return stglOpenEditPopup(templateId, promptIdentifier);
+    }
+
+    // Build a container for the Popup content
+    const container = document.createElement('div');
+    container.className = 'flex-container flexFlowColumn flexGap10';
+
+    const header = document.createElement('div');
+    header.className = 'title_restorable';
+    header.innerHTML = `<h3>Edit Prompt — ${escapeHtml(template.name)} · ${escapeHtml(prompt.name || promptIdentifier)}</h3>`;
+    container.appendChild(header);
+
+    const formHost = document.createElement('div');
+    formHost.className = 'completion_prompt_manager_popup_entry';
+    container.appendChild(formHost);
+
+    // Keep refs to form fields for populate/capture
+    let injectionPositionField;
+    let injectionDepthField;
+    let injectionOrderField;
+    let injectionTriggerField;
+    let forbidOverridesField;
+    let depthBlock;
+    let orderBlock;
+
+    const popup = new Popup(container, POPUP_TYPE.TEXT, '', {
+        okButton: 'Save',
+        cancelButton: 'Cancel',
+        allowVerticalScrolling: true,
+        wide: true,
+        large: true,
+        onOpen: () => {
+            elevatePopupHostForTop(container);
+            // Move ST master form into our popup and show it
+            formHost.appendChild(masterForm);
+            masterForm.style.display = 'block';
+
+            // Populate like stglOpenEditDrawer
+            masterForm.querySelector('#completion_prompt_manager_popup_entry_form_name').value = prompt.name || '';
+            masterForm.querySelector('#completion_prompt_manager_popup_entry_form_role').value = prompt.role || 'system';
+            masterForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt').value = prompt.content || '';
+
+            injectionPositionField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_position');
+            injectionDepthField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_depth');
+            injectionOrderField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_order');
+            injectionTriggerField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_injection_trigger');
+            forbidOverridesField = masterForm.querySelector('#completion_prompt_manager_popup_entry_form_forbid_overrides');
+            depthBlock = masterForm.querySelector('#completion_prompt_manager_depth_block');
+            orderBlock = masterForm.querySelector('#completion_prompt_manager_order_block');
+
+            if (injectionPositionField) injectionPositionField.value = (prompt.injection_position ?? 0).toString();
+            if (injectionDepthField) injectionDepthField.value = (prompt.injection_depth ?? 4).toString();
+            if (injectionOrderField) injectionOrderField.value = (prompt.injection_order ?? 100).toString();
+
+            if (injectionTriggerField) {
+                Array.from(injectionTriggerField.options).forEach(option => {
+                    option.selected = Array.isArray(prompt.injection_trigger) && prompt.injection_trigger.includes(option.value);
+                });
+            }
+
+            if (depthBlock && orderBlock && injectionPositionField) {
+                const updateVisibility = () => {
+                    const showFields = injectionPositionField.value === '1';
+                    depthBlock.style.visibility = showFields ? 'visible' : 'hidden';
+                    orderBlock.style.visibility = showFields ? 'visible' : 'hidden';
+                };
+                updateVisibility();
+                injectionPositionField.addEventListener('change', updateVisibility);
+            }
+
+            if (forbidOverridesField) forbidOverridesField.checked = prompt.forbid_overrides ?? false;
+        },
+        onClosing: (p) => {
+            // If user clicked Save, capture and persist
+            if (p.result === POPUP_RESULT.AFFIRMATIVE) {
+                const savedData = {
+                    name: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_name').value,
+                    role: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_role').value,
+                    content: masterForm.querySelector('#completion_prompt_manager_popup_entry_form_prompt').value,
+                    injection_position: injectionPositionField ? Number(injectionPositionField.value) : prompt.injection_position,
+                    injection_depth: injectionDepthField ? Number(injectionDepthField.value) : prompt.injection_depth,
+                    injection_order: injectionOrderField ? Number(injectionOrderField.value) : prompt.injection_order,
+                    injection_trigger: injectionTriggerField ? Array.from(injectionTriggerField.selectedOptions).map(opt => opt.value) : prompt.injection_trigger,
+                    forbid_overrides: forbidOverridesField?.checked ?? prompt.forbid_overrides,
+                };
+
+                Object.assign(template.prompts[promptIdentifier], savedData);
+
+                if (window.promptTemplateManager?.saveTemplate) {
+                    window.promptTemplateManager.saveTemplate(template);
+                } else if (window.promptTemplateManager?.updateTemplate) {
+                    window.promptTemplateManager.updateTemplate(template.id, { prompts: template.prompts });
+                }
+
+                toastr.success('Prompt updated in template');
+                // refresh list after closing
+            }
+            return true; // allow popup to close
+        },
+        onClose: () => {
+            // Restore the master form to body and hide
+            document.body.appendChild(masterForm);
+            masterForm.style.display = 'none';
+            // Refresh viewer after close to show updated values
+            try { window.stglViewPrompts(templateId); } catch (e) {}
+        },
+    });
+
+    await popup.show();
+}
+
+/**
+ * Fallback edit popup (no inline CSS, uses existing utility classes)
+ */
+async function stglOpenEditPopup(templateId, promptIdentifier) {
+    const template = window.promptTemplateManager.getTemplate(templateId);
+    const prompt = template?.prompts[promptIdentifier];
+
+    if (!template || !prompt) {
+        toastr.error('Prompt not found in template.');
+        return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = `
+        <div class="flex-container flexFlowColumn flexGap10">
+            <div class="flex-container flexFlowColumn">
+                <label for="stgl-edit-popup-name"><strong>Name</strong></label>
+                <input id="stgl-edit-popup-name" class="text_pole" type="text" />
+            </div>
+            <div class="flex-container flexFlowColumn">
+                <label for="stgl-edit-popup-role"><strong>Role</strong></label>
+                <select id="stgl-edit-popup-role" class="text_pole">
+                    <option value="system">system</option>
+                    <option value="user">user</option>
+                    <option value="assistant">assistant</option>
+                </select>
+            </div>
+            <div class="flex-container flexFlowColumn">
+                <label for="stgl-edit-popup-content"><strong>Content</strong></label>
+                <textarea id="stgl-edit-popup-content" class="text_pole" placeholder="Prompt content"></textarea>
+            </div>
+        </div>
+    `;
+
+    const popup = new Popup(wrapper, POPUP_TYPE.CONFIRM, '', {
+        okButton: 'Save',
+        cancelButton: 'Cancel',
+        allowVerticalScrolling: true,
+        onOpen: () => {
+            elevatePopupHostForTop(wrapper);
+            /** @type {HTMLInputElement} */(wrapper.querySelector('#stgl-edit-popup-name')).value = prompt.name || '';
+            /** @type {HTMLSelectElement} */(wrapper.querySelector('#stgl-edit-popup-role')).value = prompt.role || 'system';
+            /** @type {HTMLTextAreaElement} */(wrapper.querySelector('#stgl-edit-popup-content')).value = prompt.content || '';
+        },
+        onClosing: (p) => {
+            if (p.result === POPUP_RESULT.AFFIRMATIVE) {
+                const name = /** @type {HTMLInputElement} */(wrapper.querySelector('#stgl-edit-popup-name')).value;
+                const role = /** @type {HTMLSelectElement} */(wrapper.querySelector('#stgl-edit-popup-role')).value;
+                const content = /** @type {HTMLTextAreaElement} */(wrapper.querySelector('#stgl-edit-popup-content')).value;
+
+                Object.assign(template.prompts[promptIdentifier], { name, role, content });
+
+                // Persist via the central API (keep parity with existing drawer save)
+                if (window.promptTemplateManager?.saveTemplate) {
+                    window.promptTemplateManager.saveTemplate(template);
+                } else if (window.promptTemplateManager?.updateTemplate) {
+                    window.promptTemplateManager.updateTemplate(template.id, { prompts: template.prompts });
+                }
+
+                toastr.success('Prompt updated in template');
+                // Refresh viewer
+                window.stglViewPrompts(templateId);
+            }
+            return true;
+        }
+    });
+
+    await popup.show();
+}
+
+/**
  * Lock template to character/model/chat
  */
 window.stglLockTemplate = async function(templateId) {
@@ -725,7 +1107,10 @@ window.stglLockTemplate = async function(templateId) {
 
     const popup = new Popup(content, POPUP_TYPE.TEXT, '', {
         okButton: false,
-        cancelButton: 'Cancel'
+        cancelButton: 'Cancel',
+        onOpen: () => {
+            elevatePopupHostForTop(content);
+        }
     });
 
     // Add click handlers
