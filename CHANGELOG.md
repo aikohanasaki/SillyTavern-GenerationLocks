@@ -1,5 +1,17 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.1.0] - 2025-10-06
+
+### Changed
+- STGL is now stable and recommended for all users; removed WIP/beta warnings from documentation.
+- README.md fully rewritten for end users to reflect current feature set, locking dimensions, auto-apply logic, and stable status.
+- Minor documentation clarifications for troubleshooting and installation.
+
+### Compatibility
+- No breaking changes. All migration and lock manager logic remains fully backward compatible.
+
+---
+
 ## [1.0.1] - 2025-10-04
 
 ### Changed

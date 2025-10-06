@@ -40,7 +40,6 @@ const AUTO_APPLY_MODES = {
     ALWAYS: 'always'
 };
 
-
 const LOCKABLE_ITEMS = {
     PROFILE: 'profile',
     PRESET: 'preset',
