@@ -4,6 +4,8 @@ Advanced generation settings management with multi-dimensional locking for conne
 
 ## 🎯 Overview
 
+**[📊 See Feature Comparison: STGL vs STCL vs CCPM](./compare.md)**
+
 STGL unifies and extends functionality from:
 - Character Locks (STCL): Connection profile + preset management
 - CC Prompt Manager (CCPM): Completion template control
