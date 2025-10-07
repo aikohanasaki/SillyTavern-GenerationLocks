@@ -4,12 +4,15 @@
 
 This document compares the capabilities and design of SillyTavern Generation Locks (STGL), SillyTavern Character Locks (STCL), and CC Prompt Manager (CCPM). It is intended to help users understand the evolution of SillyTavern's generation settings management and decide which system best fits their needs.
 
+> **Note:** Both STGL and CCPM are ONLY useful for chat-completion and are not at all useful with text-completion.
+
 ---
 
 ## 📝 Overview
 
 | Feature / System                | STGL (Generation Locks)  | STCL (Character Locks) | CCPM (CC Prompt Manager) |
 |---------------------------------|:------------------------:|:----------------------:|:------------------------:|
+| **Chat-Completion Only**        | Yes                      | No                     | Yes                     |
 | **Lockable Items**              | Profile, Preset, Template| Profile, Preset        | Template                |
 | **Multi-Dimensional Locking**   | Yes (5 dimensions)       | Yes (limited)          | Yes (Character/Chat)    |
 | **Dimensions**                  | Character, Model, Chat, Group, Individual-in-Group | Character, Chat, Group  | Character, Chat         |
@@ -30,6 +33,8 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 ## 🔍 Key Differences
 
 ### STGL (Generation Locks)
+> **Only for chat-completion models. Not compatible with text-completion models.**
+
 - **Unified System:** Combines all locking and template management into a single extension.
 - **Three Lockable Items:** Profile (API connection), Preset (generation params), Template (prompt structure).
 - **Five Dimensions:** Allows locks by Character, Model, Chat, Group, and Individual-in-Group (for group chats).
@@ -47,6 +52,8 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 - **Legacy:** No new features or maintenance; recommended to migrate to STGL.
 
 ### CCPM (CC Prompt Manager)
+> **Only for chat-completion models. Not compatible with text-completion models.**
+
 - **Template-Only:** Locks only completion templates (prompt layouts), no profile or preset support.
 - **Limited Dimensions:** Locks per Character or Chat, with fixed resolution order.
 - **No Overlay:** No support for individual/group overlays.
