@@ -16,17 +16,17 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 | **Lockable Items**              | Profile, Preset, Template| Profile, Preset        | Template                |
 | **Multi-Dimensional Locking**   | Yes (5 dimensions)       | Yes (limited)          | Yes (Character/Chat)    |
 | **Dimensions**                  | Character, Model, Chat, Group, Individual-in-Group | Character, Chat, Group  | Character, Chat         |
-| **Custom Priority Order**       | Yes (UI, non-cascading)  | No (fixed)             | No (fixed)              |
-| **Individual-over-Group Overlay** | Yes (optional, flexible)| No                     | No                      |
+| **Custom Priority Order**       | Yes  | Yes             | Yes              |
+| **Individual-over-Group Overlay** | Yes (optional, flexible)| Yes                     | No                      |
 | **Auto-Apply Modes**            | Never, Ask, Always       | Partial (manual/auto)  | Manual                  |
 | **Race Condition Protection**   | Yes                      | Partial                | Partial                 |
-| **Unified UI**                  | Yes                      | No                     | No                      |
+| **Unified UI**                  | Yes                      | Yes                     | No                      |
 | **Status Indicator**            | Yes (detailed, icons)    | No                     | No                      |
 | **Migration Support**           | Yes (from STCL/CCPM)     | N/A                    | N/A                     |
 | **Template Management**         | Global, reusable         | N/A                    | Per-character/chat      |
-| **Group Chat Support**          | Full (Group & Individual)| Full (Group & Individual)                | Limited                 |
-| **Preference Settings**         | Flexible, persistent     | Basic                  | Minimal                 |
-| **Active Maintenance**          | Yes (recommended)        | No (legacy)            | No (legacy)             |
+| **Group Chat Support**          | Full (Group & Individual)| Full (Group & Individual) | Limited                 |
+| **Preference Settings**         | Flexible, persistent     | Flexible, persistent | Minimal                 |
+| **Active Maintenance**          | Yes (recommended)        | Bugfixes only            | Bugfixes only             |
 
 ---
 
