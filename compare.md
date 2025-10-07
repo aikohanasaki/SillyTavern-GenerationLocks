@@ -23,10 +23,10 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 | **Unified UI**                  | Yes                      | Yes                     | No                      |
 | **Status Indicator**            | Yes (detailed, icons)    | No                     | No                      |
 | **Migration Support**           | Yes (from STCL/CCPM)     | N/A                    | N/A                     |
-| **Template Management**         | Global, reusable         | N/A                    | Per-character/chat      |
+| **Chat Completion Prompt Template Management**         | Global, reusable         | N/A                    | Per-character/chat      |
 | **Group Chat Support**          | Full (Group & Individual)| Full (Group & Individual) | Limited                 |
-| **Preference Settings**         | Flexible, persistent     | Flexible, persistent | Minimal                 |
-| **Active Maintenance**          | Yes (recommended)        | Bugfixes only            | Bugfixes only             |
+| **Preference Settings**         | Flexible, persistent     | Flexible, persistent | Persistent                 |
+| **Active Maintenance**          | Yes (active development)        | Bugfixes only            | Bugfixes only             |
 
 ---
 
