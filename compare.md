@@ -37,28 +37,23 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 
 - **Unified System:** Combines all locking and template management into a single extension.
 - **Three Lockable Items:** Profile (API connection), Preset (generation params), Template (prompt structure).
-- **Five Dimensions:** Allows locks by Character, Model, Chat, Group, and Individual-in-Group (for group chats).
+- **Five Dimensions:** Allows locks by Character, Model/Engine, Chat, Group, and Individual-in-Group (for group chats).
 - **Custom Priority:** User chooses priority order for lock resolution (e.g., Model > Chat > Character/Group).
 - **Individual-over-Group Overlay:** In group chats, optionally overlay individual character locks over group settings.
-- **Auto-Apply:** Flexible modes (Never, Ask, Always) for lock application on context change.
-- **Robustness:** Race condition protection ensures settings are not misapplied during context switches.
-- **UI/UX:** Unified management popup, persistent status indicator with icons, and clear feedback.
+- **UI/UX:** Persistent status indicator with icons.
 
 ### STCL (Character Locks)
 - **Split Focus:** Handles Profile and Preset locking, no template management.
 - **Limited Dimensions:** Supports Character, Chat, and Group locking with a fixed priority order.
 - **No Overlay:** Cannot overlay individual character settings within group chats.
-- **UI:** Separate management interface, less intuitive than STGL.
-- **Legacy:** No new features or maintenance; recommended to migrate to STGL.
+- **Legacy:** Bugfix maintenance only.
 
 ### CCPM (CC Prompt Manager)
 > **Only for chat-completion models. Not compatible with text-completion models.**
 
 - **Template-Only:** Locks only completion templates (prompt layouts), no profile or preset support.
-- **Limited Dimensions:** Locks per Character or Chat, with fixed resolution order.
-- **No Overlay:** No support for individual/group overlays.
-- **UI:** Standalone template management (not unified with other locks).
-- **Legacy:** Deprecated in favor of STGL's integrated approach.
+- **Limited Dimensions:** Locks per Character or Chat.
+- **Legacy:** Bugfix maintenance only.
 
 ---
 
@@ -66,14 +61,5 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 
 - **STGL is the recommended and actively maintained solution.** It covers all use cases from both STCL and CCPM, and adds new features for advanced users.
 - Migration from STCL and CCPM is automatic; existing locks are imported when you switch.
-- Users benefit from a single, flexible UI and robust, context-aware locking logic.
+- Users benefit from a single UI and robust, context-aware locking logic.
 - For template sharing or updating, STGL allows global templates to be reused and updated across multiple characters, chats, or models.
-
----
-
-## 🏁 Summary
-
-- **STGL**: One unified, powerful, and user-friendly extension for all generation locking needs.
-- **STCL/CCPM**: Legacy systems with limited scope and no ongoing updates.
-
-**If you are starting new or want the best experience, use STGL.**
