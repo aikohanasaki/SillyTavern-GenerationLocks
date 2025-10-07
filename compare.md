@@ -12,14 +12,14 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 
 | Feature / System                | STGL (Generation Locks)  | STCL (Character Locks) | CCPM (CC Prompt Manager) |
 |---------------------------------|:------------------------:|:----------------------:|:------------------------:|
-| **Chat-Completion Only**        | Yes                      | No                     | Yes                     |
-| **Lockable Items**              | Profile, Preset, Template| Profile, Preset        | Template                |
-| **Multi-Dimensional Locking**   | Yes (5 dimensions)       | Yes (limited)          | Yes (Character/Chat)    |
-| **Dimensions**                  | Character, Model, Chat, Group, Individual-in-Group | Character, Chat, Group  | Character, Chat         |
+| **Chat Completion**        | Yes                      | Yes                     | Yes                     |
+| **Text Completion**        | No                      | Yes                     | No                     |
+| **Lockable Items**              | Profile, Preset, Prompt Template| Profile, Preset        | Prompt Template                |
+| **Multi-Dimensional Locking**   | Yes (5 dimensions)       | Yes (4 dimensions)          | Yes (Character/Chat)    |
+| **Dimensions**                  | Character, Model, Chat, Group, Individual-in-Group | Character, Chat, Group, Individual-in-Group  | Character, Chat         |
 | **Custom Priority Order**       | Yes  | Yes             | Yes              |
 | **Individual-over-Group Overlay** | Yes (optional, flexible)| Yes                     | No                      |
-| **Auto-Apply Modes**            | Never, Ask, Always       | Partial (manual/auto)  | Manual                  |
-| **Race Condition Protection**   | Yes                      | Partial                | Partial                 |
+| **Auto-Apply Modes**            | Never, Ask, Always       | Never, Ask, Always  | Never, Ask, Always |
 | **Unified UI**                  | Yes                      | Yes                     | No                      |
 | **Status Indicator**            | Yes (detailed, icons)    | No                     | No                      |
 | **Migration Support**           | Yes (from STCL/CCPM)     | N/A                    | N/A                     |
