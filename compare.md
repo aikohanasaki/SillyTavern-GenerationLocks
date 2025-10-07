@@ -24,7 +24,7 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 | **Status Indicator**            | Yes (detailed, icons)    | No                     | No                      |
 | **Migration Support**           | Yes (from STCL/CCPM)     | N/A                    | N/A                     |
 | **Template Management**         | Global, reusable         | N/A                    | Per-character/chat      |
-| **Group Chat Support**          | Full (Group & Individual)| Limited                | Limited                 |
+| **Group Chat Support**          | Full (Group & Individual)| Full (Group & Individual)                | Limited                 |
 | **Preference Settings**         | Flexible, persistent     | Basic                  | Minimal                 |
 | **Active Maintenance**          | Yes (recommended)        | No (legacy)            | No (legacy)             |
 
