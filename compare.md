@@ -20,10 +20,10 @@ This document compares the capabilities and design of SillyTavern Generation Loc
 | **Custom Priority Order**       | Yes  | Yes             | Yes              |
 | **Individual-over-Group Overlay** | Yes (optional, flexible)| Yes                     | No                      |
 | **Auto-Apply Modes**            | Never, Ask, Always       | Never, Ask, Always  | Never, Ask, Always |
-| **Unified UI**                  | Yes                      | Yes                     | No                      |
+| **Unified UI**                  | Split (2 modules)  | Yes                     | No                      |
 | **Status Indicator**            | Yes (detailed, icons)    | No                     | No                      |
 | **Migration Support**           | Yes (from STCL/CCPM)     | N/A                    | N/A                     |
-| **Chat Completion Prompt Template Management**         | Global, reusable         | N/A                    | Per-character/chat      |
+| **Chat Completion Prompt Template Management**         | Global, reusable         | N/A                    | Global, reusable      |
 | **Group Chat Support**          | Full (Group & Individual)| Full (Group & Individual) | Limited                 |
 | **Preference Settings**         | Flexible, persistent     | Flexible, persistent | Persistent                 |
 | **Active Maintenance**          | Yes (active development)        | Bugfixes only            | Bugfixes only             |
