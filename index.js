@@ -1898,40 +1898,39 @@ const lockManagementTemplate = Handlebars.compile(`
     </div>
 </div>
 
-
 {{#if hasActiveChat}}
-<div class="completion_prompt_manager_popup_entry_form_control">
-    <h4 class="standoutHeader">📍 Current Locks:</h4>
-    <div class="marginTop10 flex-container flexFlowColumn flexGap10">
-        {{#if isGroupChat}}
-            {{#if groupLocks}}
+    <div class="completion_prompt_manager_popup_entry_form_control">
+        <h4 class="standoutHeader">📍 Current Locks:</h4>
+        <div class="marginTop10 flex-container flexFlowColumn flexGap10">
+            {{#if isGroupChat}}
+                {{#if groupLocks}}
+                <div class="text_pole padding10">
+                    <strong>Group:</strong> {{groupName}}<br>
+                    {{groupLocks}}
+                </div>
+                {{/if}}
+            {{else}}
+                {{#if characterLocks}}
+                <div class="text_pole padding10">
+                    <strong>Character:</strong> {{characterName}}<br>
+                    {{characterLocks}}
+                </div>
+                {{/if}}
+            {{/if}}
+            {{#if chatLocks}}
             <div class="text_pole padding10">
-                <strong>Group:</strong> {{groupName}}<br>
-                {{groupLocks}}
+                <strong>Chat Locks:</strong><br>
+                {{chatLocks}}
             </div>
             {{/if}}
-        {{else}}
-            {{#if characterLocks}}
+            {{#if modelLocks}}
             <div class="text_pole padding10">
-                <strong>Character:</strong> {{characterName}}<br>
-                {{characterLocks}}
+                <strong>Model:</strong> {{modelName}}<br>
+                {{modelLocks}}
             </div>
             {{/if}}
-        {{/if}}
-        {{#if chatLocks}}
-        <div class="text_pole padding10">
-            <strong>Chat Locks:</strong><br>
-            {{chatLocks}}
         </div>
-        {{/if}}
-        {{#if modelLocks}}
-        <div class="text_pole padding10">
-            <strong>Model:</strong> {{modelName}}<br>
-            {{modelLocks}}
-        </div>
-        {{/if}}
     </div>
-</div>
 {{/if}}
 `);
 
@@ -2063,6 +2062,22 @@ function initializePriorityDropdowns() {
     return;
 }
 
+function addPopupWrapStyle() {
+    if (document.getElementById('stgl-popup-fix')) return;
+
+    const css = `
+        .popup-controls {
+            flex-wrap: wrap !important;
+            justify-content: center !important;
+        }
+    `;
+
+    const style = document.createElement('style');
+    style.id = 'stgl-popup-fix';
+    style.textContent = css;
+    document.head.appendChild(style);
+}
+
 /**
  * Show lock management popup
  */
@@ -2084,25 +2099,25 @@ async function showLockManagementPopup() {
 
 const customButtons = [];
 // Save preferences explicitly (refuses duplicates, keeps dialog open)
-customButtons.push({
-    text: '💾 Save',
-    classes: ['menu_button'],
-    action: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        try {
-            const root = currentPopupInstance?.dlg;
-            const ok = await savePreferencesFromPopup(root);
-            if (ok) {
-                try { toastr.success('Preferences saved'); } catch (e) {}
-                updateDisplay();
+    customButtons.push({
+        text: '💾 Save',
+        classes: ['menu_button'],
+        action: async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                const root = currentPopupInstance?.dlg;
+                const ok = await savePreferencesFromPopup(root);
+                if (ok) {
+                    try { toastr.success('Preferences saved'); } catch (e) {}
+                    updateDisplay();
+                }
+            } catch (e) {
+                console.error('STGL: Error saving preferences:', e);
+                try { toastr.error('Failed to save preferences'); } catch (_e) {}
             }
-        } catch (e) {
-            console.error('STGL: Error saving preferences:', e);
-            try { toastr.error('Failed to save preferences'); } catch (_e) {}
         }
-    }
-});
+    });
 
     // Add save/clear buttons if there's an active chat
     if (hasActiveChat && settingsManager) {
@@ -2283,8 +2298,10 @@ customButtons.push({
     });
 
     const popupOptions = {
+        wide: true,
+        large: true,
         allowVerticalScrolling: true,
-        customButtons,
+        customButtons: customButtons,
         cancelButton: 'Close',
         okButton: false,
         onClose: handlePopupClose
@@ -2301,7 +2318,8 @@ customButtons.push({
         try {
             const btnContainer = currentPopupInstance?.dlg?.querySelector?.('.popup-controls');
             if (btnContainer) {
-                btnContainer.classList.add('flexWrap', 'justifyCenter');
+                // Ensure container is flex and allows wrapping and spacing
+                btnContainer.classList.add('flex-container', 'flexWrap', 'justifyCenter', 'flexGap5', 'flexFlowRow');
             }
         } catch (e) {}
     } catch (error) {
@@ -2414,6 +2432,9 @@ async function init() {
     if (DEBUG_MODE) console.log('STGL: Initializing...');
 
     try {
+        // Ensure popup controls wrap like STMTL
+        addPopupWrapStyle();
+
         // Initialize storage and ensure default settings exist
         const storage = new StorageAdapter();
         const settings = storage.getExtensionSettings();
