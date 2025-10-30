@@ -1,5 +1,10 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.1.1] - 2025-10-29
+
+### Changed
+- fixed button wrapping in chat mode
+
 ## [1.1.0] - 2025-10-06
 
 ### Changed
