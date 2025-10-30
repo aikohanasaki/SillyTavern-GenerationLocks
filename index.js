@@ -51,6 +51,7 @@ const DEFAULT_SETTINGS = {
         preferIndividualCharacterInGroup: true,
         showNotifications: true,
         autoApplyOnContextChange: AUTO_APPLY_MODES.ASK,
+        autoApplyOnGenerationStart: AUTO_APPLY_MODES.ASK,
         // Priority order: first in array wins (highest priority)
         // Default: MODEL > CHAT > CHARACTER/GROUP
         priorityOrder: [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER]
@@ -1211,13 +1212,13 @@ class SettingsManager {
     /**
      * Context change event handler
      */
-    onContextChanged() {
+    onContextChanged(source = null) {
         if (contextChangeQueue.length >= MAX_CONTEXT_QUEUE_SIZE) {
             contextChangeQueue.shift();
         }
         contextChangeQueue.push(Date.now());
-        if (DEBUG_MODE) console.log('STGL: Context change queued');
-        this._processContextChangeQueue();
+        if (DEBUG_MODE) console.log('STGL: Context change queued', source ? `(${source})` : '');
+        this._processContextChangeQueue(source);
     }
 
     /**
@@ -1279,7 +1280,7 @@ class SettingsManager {
      * Process context change queue (debounced)
      * @private
      */
-    async _processContextChangeQueue() {
+    async _processContextChangeQueue(source = null) {
         if (processingContext || contextChangeQueue.length === 0) return;
 
         processingContext = true;
@@ -1293,7 +1294,7 @@ class SettingsManager {
                 return;
             }
 
-            const shouldApply = await this._shouldApplyAutomatically();
+            const shouldApply = await this._shouldApplyAutomatically(source);
             if (shouldApply && !isApplyingSettings) {
                 if (DEBUG_MODE) console.log('STGL: Auto-applying locks on context change');
                 const success = await this.applyLocksForContext();
@@ -1339,9 +1340,12 @@ class SettingsManager {
      * Check if locks should be applied automatically
      * @private
      */
-    async _shouldApplyAutomatically() {
+    async _shouldApplyAutomatically(source = null) {
         const preferences = this.storage.getPreferences();
-        const mode = preferences.autoApplyOnContextChange;
+        const isGenStart = source === event_types.GENERATION_STARTED;
+        const mode = isGenStart
+            ? (preferences.autoApplyOnGenerationStart ?? preferences.autoApplyOnContextChange)
+            : preferences.autoApplyOnContextChange;
 
         if (mode === AUTO_APPLY_MODES.NEVER) return false;
         if (mode === AUTO_APPLY_MODES.ALWAYS) return true;
@@ -1551,12 +1555,12 @@ function registerEventHandler(eventType, handler, description = '') {
 /**
  * Main context change handler
  */
-function onContextChanged() {
+function onContextChanged(source = null) {
     if (!settingsManager) {
         if (DEBUG_MODE) console.warn('STGL: settingsManager not initialized');
         return;
     }
-    settingsManager.onContextChanged();
+    settingsManager.onContextChanged(source);
     updateDisplay();
 }
 
@@ -1795,6 +1799,7 @@ function registerAllEventHandlers() {
         // Primary context change events
         registerEventHandler(event_types.CHAT_CHANGED, onContextChanged, 'character/chat change');
         registerEventHandler(event_types.GROUP_CHAT_CREATED, onContextChanged, 'group chat creation');
+        registerEventHandler(event_types.GENERATION_STARTED, () => onContextChanged(event_types.GENERATION_STARTED), 'message received');
 
         // Individual character locks in groups
         if (event_types.GROUP_MEMBER_DRAFTED) {
@@ -1892,6 +1897,18 @@ const lockManagementTemplate = Handlebars.compile(`
         {{#each autoApplyOptions}}
         <label class="radio_label">
             <input type="radio" name="stgl-auto-apply-mode" value="{{value}}" {{#if checked}}checked{{/if}}>
+            <span>{{label}}</span>
+        </label>
+        {{/each}}
+    </div>
+</div>
+
+<div class="completion_prompt_manager_popup_entry_form_control">
+    <h4 class="standoutHeader">⚙️ Auto-apply on generation start:</h4>
+    <div class="marginTop10">
+        {{#each autoApplyGenStartOptions}}
+        <label class="radio_label">
+            <input type="radio" name="stgl-auto-apply-generation-start" value="{{value}}" {{#if checked}}checked{{/if}}>
             <span>{{label}}</span>
         </label>
         {{/each}}
@@ -2008,6 +2025,13 @@ async function getPopupContent() {
         { value: AUTO_APPLY_MODES.ASK, label: 'Ask before applying', checked: preferences.autoApplyOnContextChange === AUTO_APPLY_MODES.ASK },
         { value: AUTO_APPLY_MODES.ALWAYS, label: 'Always auto-apply', checked: preferences.autoApplyOnContextChange === AUTO_APPLY_MODES.ALWAYS }
     ];
+    // Auto-apply for Generation Started
+    const genStartMode = preferences.autoApplyOnGenerationStart ?? preferences.autoApplyOnContextChange ?? AUTO_APPLY_MODES.ASK;
+    const autoApplyGenStartOptions = [
+        { value: AUTO_APPLY_MODES.NEVER, label: 'Never auto-apply', checked: genStartMode === AUTO_APPLY_MODES.NEVER },
+        { value: AUTO_APPLY_MODES.ASK, label: 'Ask before applying', checked: genStartMode === AUTO_APPLY_MODES.ASK },
+        { value: AUTO_APPLY_MODES.ALWAYS, label: 'Always auto-apply', checked: genStartMode === AUTO_APPLY_MODES.ALWAYS }
+    ];
 
 
     // Get current locks
@@ -2031,6 +2055,7 @@ async function getPopupContent() {
         priorityOptions3,
         preferIndividualCharacterInGroup: preferences.preferIndividualCharacterInGroup,
         autoApplyOptions,
+        autoApplyGenStartOptions,
         characterLocks: formatLockInfo(characterLocks),
         groupLocks: formatLockInfo(groupLocks),
         chatLocks: formatLockInfo(chatLocks),
@@ -2371,6 +2396,11 @@ async function savePreferencesFromPopup(popupElement) {
         const autoApplyRadio = popupElement.querySelector('input[name="stgl-auto-apply-mode"]:checked');
         if (autoApplyRadio) {
             storage.updatePreference('autoApplyOnContextChange', autoApplyRadio.value);
+        }
+        // Save auto-apply on generation start
+        const autoApplyGenStartRadio = popupElement.querySelector('input[name="stgl-auto-apply-generation-start"]:checked');
+        if (autoApplyGenStartRadio) {
+            storage.updatePreference('autoApplyOnGenerationStart', autoApplyGenStartRadio.value);
         }
 
         if (DEBUG_MODE) console.log('STGL: Preferences saved (explicit)');

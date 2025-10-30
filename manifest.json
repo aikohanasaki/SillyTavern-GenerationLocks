@@ -5,7 +5,7 @@
     "optional": [],
     "js": "index.js",
     "author": "aikohanasaki",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "homePage": "https://github.com/aikohanasaki/SillyTavern-GenerationLocks",
     "description": "Advanced generation settings management with multi-dimensional locking for profiles, presets, and templates. Combines connection profile management with completion template control."
 }

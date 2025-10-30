@@ -1,5 +1,10 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.2.0] - 2025-10-30
+
+### Enhancement
+- add generation start lock check/apply
+
 ## [1.1.1] - 2025-10-29
 
 ### Changed
