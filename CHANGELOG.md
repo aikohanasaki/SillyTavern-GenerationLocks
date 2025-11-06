@@ -1,17 +1,18 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
-## [1.2.0] - 2025-10-30
+## [1.2.1] - 2025-11-06
+### Bugfix
+- fix Z-index for prompt templates popup
 
+## [1.2.0] - 2025-10-30
 ### Enhancement
 - add generation start lock check/apply
 
 ## [1.1.1] - 2025-10-29
-
 ### Changed
 - fixed button wrapping in chat mode
 
 ## [1.1.0] - 2025-10-06
-
 ### Changed
 - STGL is now stable and recommended for all users; removed WIP/beta warnings from documentation.
 - README.md fully rewritten for end users to reflect current feature set, locking dimensions, auto-apply logic, and stable status.
@@ -23,7 +24,6 @@
 ---
 
 ## [1.0.1] - 2025-10-04
-
 ### Changed
 - Priority labeling unified in group contexts:
   - All user-facing labels now show “Character/Group” when in group chats (status indicator, auto-apply confirmation, preset-restore prompt).
@@ -62,7 +62,6 @@
 ---
 
 ## [1.0.0] - 2025-10-02
-
 ### 🎉 Initial Release
 
 Complete implementation of Generation Locks system merging functionality from:
