@@ -5,6 +5,7 @@
  */
 
 import { Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup } from '../../../popup.js';
+import { oai_settings } from '../../../openai.js';
 
 let mainPopup = null;
 
@@ -234,7 +235,7 @@ function setupTemplateManagerEvents() {
  */
 async function showCreateTemplateDialog() {
     // Get available prompts from ST's Prompt Manager
-    const availablePrompts = window.oai_settings?.prompts || [];
+    const availablePrompts = oai_settings?.prompts || [];
     const promptList = availablePrompts.filter(p => p.identifier);
 
     if (promptList.length === 0) {

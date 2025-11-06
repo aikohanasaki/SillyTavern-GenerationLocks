@@ -1,5 +1,9 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.2.2] - 2025-11-06
+### Bugfix
+- fix missing oai_settings import
+
 ## [1.2.1] - 2025-11-06
 ### Bugfix
 - fix Z-index for prompt templates popup
