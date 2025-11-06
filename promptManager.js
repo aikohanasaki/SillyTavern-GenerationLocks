@@ -20,23 +20,42 @@ function elevatePopupHostForTop(contentNode) {
         const dlg = el.closest('dialog.popup, dialog, .popup, [role="dialog"]');
         if (!dlg) return;
 
+        console.debug('elevatePopupHostForTop target dlg:', dlg);
+
         // Monotonic z-index so each new popup stacks above previous ones
         STGL_POPUP_Z = (window.__STGL_POPUP_Z || STGL_POPUP_Z || 10050) + 1;
         window.__STGL_POPUP_Z = STGL_POPUP_Z;
 
         dlg.style.zIndex = String(STGL_POPUP_Z);
-        if (!dlg.style.position) {
+
+        // Use computed style to check position; force relative if not absolute/fixed/sticky
+        const computedPosition = window.getComputedStyle(dlg).position;
+        if (!['absolute', 'fixed', 'sticky'].includes(computedPosition)) {
             dlg.style.position = 'relative';
         }
 
-        // Re-append to body to ensure it is the last child (DOM order)
-        if (dlg.parentNode) {
+        // Only re-append if dlg is not the last child of body
+        if (dlg.parentNode === document.body && dlg !== document.body.lastElementChild) {
             document.body.appendChild(dlg);
+            console.debug('Re-appended dlg to body to bring to front.');
+        }
+
+        // Ensure visible (remove display:none if any)
+        if (dlg.style.display === 'none') {
+            dlg.style.display = '';
+            console.debug('Cleared display:none to ensure visibility.');
+        }
+
+        // Ensure visible (remove visibility:hidden if any)
+        if (dlg.style.visibility === 'hidden') {
+            dlg.style.visibility = '';
+            console.debug('Cleared visibility:hidden to ensure visibility.');
         }
     } catch (e) {
         console.debug('STGL elevatePopupHostForTop failed:', e);
     }
 }
+
 
 /**
  * Inject the Prompt Template Manager button into extensions menu
