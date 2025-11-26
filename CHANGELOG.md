@@ -1,5 +1,9 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.2.3] - 2025-11-26
+### Bugfix
+- fix generation apply loop
+
 ## [1.2.2] - 2025-11-06
 ### Bugfix
 - fix missing oai_settings import

@@ -1242,13 +1242,20 @@ class SettingsManager {
         const nPreset = norm(locks.preset);
         const nTemplate = norm(locks.template);
 
+        // Snapshot current state before applying to detect actual changes
+        const before = {
+            profile: this.profileLocker.getCurrentProfile(),
+            preset: this.presetLocker.getCurrentPreset(),
+            templateMatches: nTemplate !== null ? this.templateLocker.compareWithTemplate(nTemplate) : null,
+        };
+
         // 1. Profile first (changes connection)
         if (nProfile !== null) {
             const success = await this.profileLocker.applyProfile(nProfile, originalContextId);
             if (!success) {
                 console.warn('STGL: Failed to apply profile lock');
                 try { if (prefs.showNotifications) toastr.error('Failed to apply profile lock'); } catch (e) {}
-                return false;
+                return { success: false, changed: false };
             }
         }
 
@@ -1258,7 +1265,7 @@ class SettingsManager {
             if (!success) {
                 console.warn('STGL: Failed to apply preset lock');
                 try { if (prefs.showNotifications) toastr.error('Failed to apply preset lock'); } catch (e) {}
-                return false;
+                return { success: false, changed: false };
             }
         }
 
@@ -1268,12 +1275,25 @@ class SettingsManager {
             if (!success) {
                 console.warn('STGL: Failed to apply template lock');
                 try { if (prefs.showNotifications) toastr.error('Failed to apply template lock'); } catch (e) {}
-                return false;
+                return { success: false, changed: false };
             }
         }
 
         if (DEBUG_MODE) console.log('STGL: All locks applied successfully');
-        return true;
+
+        // Snapshot after applying and compute whether anything actually changed
+        const after = {
+            profile: this.profileLocker.getCurrentProfile(),
+            preset: this.presetLocker.getCurrentPreset(),
+            templateMatches: nTemplate !== null ? this.templateLocker.compareWithTemplate(nTemplate) : null,
+        };
+
+        const changed =
+            (nProfile !== null && before.profile !== after.profile) ||
+            (nPreset !== null && before.preset !== after.preset) ||
+            (nTemplate !== null && (before.templateMatches === false && after.templateMatches === true));
+
+        return { success: true, changed };
     }
 
     /**
@@ -1297,12 +1317,15 @@ class SettingsManager {
             const shouldApply = await this._shouldApplyAutomatically(source);
             if (shouldApply && !isApplyingSettings) {
                 if (DEBUG_MODE) console.log('STGL: Auto-applying locks on context change');
-                const success = await this.applyLocksForContext();
+                const result = await this.applyLocksForContext();
                 try {
                     const prefs = this.storage.getPreferences?.() || {};
                     if (prefs.showNotifications) {
-                        if (success) {
-                            toastr.success('Generation locks applied');
+                        if (result && result.success) {
+                            // Only notify when an actual change occurred
+                            if (result.changed) {
+                                toastr.success('Generation locks applied');
+                            }
                         } else {
                             toastr.error('Failed to apply generation locks');
                         }
@@ -1348,7 +1371,25 @@ class SettingsManager {
             : preferences.autoApplyOnContextChange;
 
         if (mode === AUTO_APPLY_MODES.NEVER) return false;
-        if (mode === AUTO_APPLY_MODES.ALWAYS) return true;
+        if (mode === AUTO_APPLY_MODES.ALWAYS) {
+            // Only auto-apply if something would actually change
+            const context = this.chatContext.getCurrent();
+            const resolved = this.priorityResolver.resolve(context, preferences);
+
+            if (resolved.locks.profile || resolved.locks.preset || resolved.locks.template) {
+                const currentProfile = this.profileLocker.getCurrentProfile();
+                const currentPreset = this.presetLocker.getCurrentPreset();
+                const currentTemplate = await this.templateLocker.getCurrentTemplate();
+
+                const profileDiffers = resolved.locks.profile && resolved.locks.profile !== currentProfile;
+                const presetDiffers = resolved.locks.preset && resolved.locks.preset !== currentPreset;
+                const templateDiffers = resolved.locks.template && !this.templateLocker.compareWithTemplate(resolved.locks.template);
+
+                return profileDiffers || presetDiffers || templateDiffers;
+            }
+
+            return false;
+        }
 
         // ASK mode - check if there are locks to apply AND if they differ from current settings
         const context = this.chatContext.getCurrent();
