@@ -1692,29 +1692,40 @@ async function onPresetChanged() {
 
             console.log('STGL: Prompts match template?', promptsMatchTemplate);
 
-            // Template differs from locked one - ask to restore
+            // Template differs from locked one - handle per auto-apply preference
             if (!promptsMatchTemplate) {
-                const templateObj = settingsManager.storage.getTemplate(resolved.locks.template);
-                const templateName = templateObj ? templateObj.name : resolved.locks.template;
-                const isGroupChat = context.isGroupChat;
-                const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Character/Group' : 'Character', group: isGroupChat ? 'Character/Group' : 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
-                const sourceLabel = resolved.sources?.template ? toTitleCase(resolved.sources.template) : 'unknown';
+                const mode = preferences.autoApplyOnContextChange ?? AUTO_APPLY_MODES.ASK;
 
-                const message = `The preset you selected may have changed your completion template.<br><br>` +
-                    `Do you want to restore the locked template?<br><br>` +
-                    `<b>${templateName}</b> <small class="text_muted">(locked from ${sourceLabel})</small>`;
-
-                const result = await callGenericPopup(
-                    message,
-                    POPUP_TYPE.CONFIRM,
-                    '',
-                    { okButton: 'Restore Template', cancelButton: 'Keep New Template' }
-                );
-
-                if (result === POPUP_RESULT.AFFIRMATIVE) {
+                if (mode === AUTO_APPLY_MODES.ALWAYS) {
                     const originalContextId = context.primaryId;
                     await settingsManager.templateLocker.applyTemplate(resolved.locks.template, originalContextId);
-                    toastr.success('Template restored');
+                    try { toastr.success('Template restored'); } catch (e) {}
+                } else if (mode === AUTO_APPLY_MODES.ASK) {
+                    const templateObj = settingsManager.storage.getTemplate(resolved.locks.template);
+                    const templateName = templateObj ? templateObj.name : resolved.locks.template;
+                    const isGroupChat = context.isGroupChat;
+                    const toTitleCase = (s) => s ? ({ chat: 'Chat', character: isGroupChat ? 'Character/Group' : 'Character', group: isGroupChat ? 'Character/Group' : 'Group', model: 'Model', individual: 'Individual' }[s] || s) : null;
+                    const sourceLabel = resolved.sources?.template ? toTitleCase(resolved.sources.template) : 'unknown';
+
+                    const message = `The preset you selected may have changed your completion template.<br><br>` +
+                        `Do you want to restore the locked template?<br><br>` +
+                        `<b>${templateName}</b> <small class="text_muted">(locked from ${sourceLabel})</small>`;
+
+                    const result = await callGenericPopup(
+                        message,
+                        POPUP_TYPE.CONFIRM,
+                        '',
+                        { okButton: 'Restore Template', cancelButton: 'Keep New Template' }
+                    );
+
+                    if (result === POPUP_RESULT.AFFIRMATIVE) {
+                        const originalContextId = context.primaryId;
+                        await settingsManager.templateLocker.applyTemplate(resolved.locks.template, originalContextId);
+                        try { toastr.success('Template restored'); } catch (e) {}
+                    }
+                } else {
+                    // NEVER: do not automatically restore and do not prompt
+                    if (DEBUG_MODE) console.log('STGL: Auto-restore disabled (NEVER); leaving template as-is after preset change.');
                 }
             }
         }
