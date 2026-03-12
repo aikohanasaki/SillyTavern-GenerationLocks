@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
         priorityOrder: [SETTING_SOURCES.MODEL, SETTING_SOURCES.CHAT, SETTING_SOURCES.CHARACTER]
     },
     characterLocks: {},  // { [chId]: { profile, preset, template } }
+    defaultSingleCharacterLock: null, // Fallback for single chats without a stable character identity
     modelLocks: {},      // { [model]: { preset, template } } - NO profile field
     chatLocks: {},       // Will use chat_metadata.STGL { profile, preset, template }
     groupLocks: {},      // Will use group.stgl_locks { profile, preset, template }
@@ -220,6 +221,10 @@ class StorageAdapter {
 
         const settings = extension_settings[this.EXTENSION_KEY];
 
+        if (!Object.prototype.hasOwnProperty.call(settings, 'defaultSingleCharacterLock')) {
+            settings.defaultSingleCharacterLock = null;
+        }
+
         // Cleanup deprecated preferences (alpha)
         if (settings.moduleSettings) {
             delete settings.moduleSettings.lockingMode;
@@ -314,6 +319,29 @@ class StorageAdapter {
 
         if (cleared) this.saveExtensionSettings();
         return cleared;
+    }
+
+    getDefaultSingleCharacterLock() {
+        const settings = this.getExtensionSettings();
+        return settings.defaultSingleCharacterLock || null;
+    }
+
+    setDefaultSingleCharacterLock(locks) {
+        const settings = this.getExtensionSettings();
+        settings.defaultSingleCharacterLock = locks;
+        this.saveExtensionSettings();
+        return true;
+    }
+
+    clearDefaultSingleCharacterLock() {
+        const settings = this.getExtensionSettings();
+        if (!settings.defaultSingleCharacterLock) {
+            return false;
+        }
+
+        settings.defaultSingleCharacterLock = null;
+        this.saveExtensionSettings();
+        return true;
     }
 
     // ===== MODEL LOCKS =====
@@ -593,10 +621,17 @@ class PriorityResolver {
      */
     _getLockForDimension(dimension, context) {
         switch (dimension) {
-            case SETTING_SOURCES.CHARACTER:
+            case SETTING_SOURCES.CHARACTER: {
                 if (context.isGroupChat) return null; // Skip in groups
-                const chId = this._getCharacterIndex(context.characterName);
-                return this.storage.getCharacterLock(chId !== -1 ? chId : context.characterName);
+                const target = resolveCharacterLockTarget(context);
+                if (target.mode === 'default-single') {
+                    return this.storage.getDefaultSingleCharacterLock();
+                }
+                if (target.mode === 'character') {
+                    return this.storage.getCharacterLock(target.key);
+                }
+                return null;
+            }
 
             case SETTING_SOURCES.MODEL:
                 return this.storage.getModelLock(context.modelName);
@@ -1479,12 +1514,21 @@ const result = await callGenericPopup(
                 }
             } else {
                 // Single character context
-                if (targets.character && context.characterName) {
-                    const chId = characters?.findIndex(x => x.name === context.characterName);
-                    const characterKey = chId !== -1 ? chId : context.characterName;
-                    this.storage.setCharacterLock(characterKey, currentLocks);
-                    savedCount++;
-                    if (DEBUG_MODE) console.log('STGL: Saved character lock');
+                if (targets.character) {
+                    const target = resolveCharacterLockTarget(context);
+                    let saved = false;
+
+                    if (target.mode === 'default-single') {
+                        saved = this.storage.setDefaultSingleCharacterLock(currentLocks);
+                        if (DEBUG_MODE) console.log('STGL: Saved default single-character lock');
+                    } else if (target.mode === 'character') {
+                        saved = this.storage.setCharacterLock(target.key, currentLocks);
+                        if (DEBUG_MODE) console.log('STGL: Saved character lock');
+                    }
+
+                    if (saved) {
+                        savedCount++;
+                    }
                 }
                 if (targets.chat) {
                     this.storage.setChatLock(currentLocks);
@@ -1531,11 +1575,19 @@ const result = await callGenericPopup(
                     clearedCount++;
                 }
             } else {
-                if (targets.character && context.characterName) {
-                    const chId = characters?.findIndex(x => x.name === context.characterName);
-                    const characterKey = chId !== -1 ? chId : context.characterName;
-                    this.storage.clearCharacterLock(characterKey);
-                    clearedCount++;
+                if (targets.character) {
+                    const target = resolveCharacterLockTarget(context);
+                    let cleared = false;
+
+                    if (target.mode === 'default-single') {
+                        cleared = this.storage.clearDefaultSingleCharacterLock();
+                    } else if (target.mode === 'character') {
+                        cleared = this.storage.clearCharacterLock(target.key);
+                    }
+
+                    if (cleared) {
+                        clearedCount++;
+                    }
                 }
                 if (targets.chat) {
                     this.storage.clearChatLock();
@@ -2041,11 +2093,42 @@ function getDisplayCharacterName(characterName) {
     }
 
     const normalized = String(characterName).trim();
-    if (!normalized || /^\{\{[^{}]+\}\}$/.test(normalized)) {
+    if (!normalized || isUnresolvedMacroValue(normalized)) {
         return fallbackName;
     }
 
     return normalized;
+}
+
+function isUnresolvedMacroValue(value) {
+    if (value === undefined || value === null) {
+        return false;
+    }
+
+    return /^\{\{[^{}]+\}\}$/.test(String(value).trim());
+}
+
+function resolveCharacterLockTarget(context) {
+    if (!context || context.isGroupChat) {
+        return { mode: 'none', key: null };
+    }
+
+    const rawName = context.characterName;
+    const normalizedName = rawName === undefined || rawName === null ? '' : String(rawName).trim();
+    if (!normalizedName || isUnresolvedMacroValue(normalizedName)) {
+        return { mode: 'default-single', key: null };
+    }
+
+    const chId = Array.isArray(characters) ? characters.findIndex(x => x.name === normalizedName) : -1;
+    if (chId !== -1) {
+        return { mode: 'character', key: chId };
+    }
+
+    if (normalizedName === neutralCharacterName) {
+        return { mode: 'default-single', key: null };
+    }
+
+    return { mode: 'character', key: normalizedName };
 }
 
 /**
@@ -2109,8 +2192,14 @@ async function getPopupContent() {
 
 
     // Get current locks
-    const chIndex = !isGroupChat && context.characterName && Array.isArray(characters) ? characters.findIndex(x => x.name === context.characterName) : -1;
-    const characterLocks = isGroupChat ? null : storage.getCharacterLock(chIndex !== -1 ? chIndex : context.characterName);
+    const characterTarget = resolveCharacterLockTarget(context);
+    const characterLocks = isGroupChat
+        ? null
+        : characterTarget.mode === 'default-single'
+            ? storage.getDefaultSingleCharacterLock()
+            : characterTarget.mode === 'character'
+                ? storage.getCharacterLock(characterTarget.key)
+                : null;
     const groupLocks = isGroupChat ? storage.getGroupLock(context.groupId) : null;
     const chatLocks = storage.getChatLock();
     const modelLocks = storage.getModelLock(context.modelName);
@@ -2232,9 +2321,13 @@ const customButtons = [];
                         event.preventDefault();
                         event.stopPropagation();
                         try {
-                            await settingsManager.saveCurrentUILocks({ character: true, chat: false, model: false });
-                            toastr.success('Character locks saved');
-                            await refreshPopupAfterSave();
+                            const saved = await settingsManager.saveCurrentUILocks({ character: true, chat: false, model: false });
+                            if (saved) {
+                                toastr.success('Character locks saved');
+                                await refreshPopupAfterSave();
+                            } else {
+                                toastr.error('Failed to save character locks');
+                            }
                         } catch (error) {
                             console.error('STGL: Error saving character locks:', error);
                             toastr.error('Failed to save character locks');
@@ -2337,9 +2430,13 @@ const customButtons = [];
                     event.preventDefault();
                     event.stopPropagation();
                     try {
-                        await settingsManager.clearLocks({ character: true, chat: false, model: false });
-                        toastr.info(isGroupChat ? 'Group locks cleared' : 'Character locks cleared');
-                        await refreshPopupAfterSave();
+                        const cleared = await settingsManager.clearLocks({ character: true, chat: false, model: false });
+                        if (cleared) {
+                            toastr.info(isGroupChat ? 'Group locks cleared' : 'Character locks cleared');
+                            await refreshPopupAfterSave();
+                        } else {
+                            toastr.info(isGroupChat ? 'No group locks to clear' : 'No character locks to clear');
+                        }
                     } catch (error) {
                         console.error('STGL: Error clearing locks:', error);
                         toastr.error('Failed to clear locks');
