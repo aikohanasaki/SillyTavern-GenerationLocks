@@ -1407,7 +1407,9 @@ class SettingsManager {
 
             // Only ask if something would actually change
             if (profileDiffers || presetDiffers || templateDiffers) {
-const contextName = context.characterName || context.groupName || 'this context';
+const contextName = context.isGroupChat
+    ? (context.groupName || 'this context')
+    : getDisplayCharacterName(context.characterName);
 const profileName = resolved.locks.profile || '—';
 const presetName = resolved.locks.preset || '—';
 let templateName = '—';
@@ -2027,6 +2029,26 @@ function formatLockInfo(lock) {
 }
 
 /**
+ * Normalize a character name for UI display only.
+ * Falls back to the neutral assistant label when the upstream value is blank
+ * or still an unresolved macro token such as {{characterName}}.
+ */
+function getDisplayCharacterName(characterName) {
+    const fallbackName = neutralCharacterName || 'Assistant';
+
+    if (characterName === undefined || characterName === null) {
+        return fallbackName;
+    }
+
+    const normalized = String(characterName).trim();
+    if (!normalized || /^\{\{[^{}]+\}\}$/.test(normalized)) {
+        return fallbackName;
+    }
+
+    return normalized;
+}
+
+/**
  * Get popup content data
  */
 async function getPopupContent() {
@@ -2098,7 +2120,7 @@ async function getPopupContent() {
         statusText,
         isGroupChat,
         hasActiveChat,
-        characterName: context.characterName,
+        characterName: getDisplayCharacterName(context.characterName),
         groupName: context.groupName,
         modelName: context.modelName,
         checkboxes,

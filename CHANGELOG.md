@@ -1,5 +1,9 @@
 # Changelog - SillyTavern Generation Locks (STGL)
 
+## [1.2.4] - 2026-03-12
+### Bugfix
+- fix `{{characterName}}` display when `{{char}}` is Assistant
+
 ## [1.2.3] - 2025-11-26
 ### Bugfix
 - fix generation apply loop
