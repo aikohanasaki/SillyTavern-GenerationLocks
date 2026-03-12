@@ -3,6 +3,7 @@
 ## [1.2.4] - 2026-03-12
 ### Bugfix
 - fix `{{characterName}}` display when `{{char}}` is Assistant
+- fix locks not applying when default Assistant is active
 
 ## [1.2.3] - 2025-11-26
 ### Bugfix
