@@ -56,19 +56,10 @@ Auto-apply triggers on:
 ### Race Condition Protection
 All lock applications verify the context hasn't changed during async operations, preventing misapplies.
 
-## 🚀 Installation
-
-1. Navigate to your SillyTavern extensions directory:
-   `SillyTavern/public/scripts/extensions/third-party/`
-2. Clone or download this extension:
-   `git clone https://github.com/Aikobots/SillyTavern-GenerationLocks`
-3. Restart SillyTavern or reload extensions.
-4. Look for the 🔒 “Generation Locks” button in the extensions menu.
-
 ## 📖 Usage
 
 ### Open the Lock Manager
-Click the 🔒 “Generation Locks” button in the extensions menu.
+Click the 🔒 “Generation Locks” button in the extensions menu (it is the magic wand 🪄 in the text input box on the left).
 
 ### Set/Clear/Apply
 - **Set Character/Group** — Save current UI settings as Character (single chat) or Group (group chat) lock
